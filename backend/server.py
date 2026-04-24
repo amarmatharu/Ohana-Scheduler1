@@ -22,7 +22,7 @@ from models import (
     UserPublic,
 )
 from auth import build_auth_router, seed_admin, hash_password
-from maps_service import geocode
+from maps_service import geocode, places_autocomplete
 from matching import match_therapists_for_client
 from scheduling import validate_new_block, compute_session_flags, hours_scheduled
 from ics_export import build_ics
@@ -281,6 +281,15 @@ async def dashboard_stats(admin: dict = Depends(require_role("admin"))):
 
 
 # ================= Map (locations) =================
+@api.get("/places/autocomplete")
+async def places_autocomplete_endpoint(input: str = "", user: dict = Depends(get_current_user)):
+    """Address typeahead — admin/therapist/client all permitted (auth-gated)."""
+    if not input or len(input) < 3:
+        return {"suggestions": []}
+    suggestions = await places_autocomplete(input)
+    return {"suggestions": suggestions}
+
+
 @api.get("/locations")
 async def locations(admin: dict = Depends(require_role("admin"))):
     """Return therapist + client geocoded locations for the map view."""

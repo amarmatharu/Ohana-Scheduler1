@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, formatApiError } from "../lib/api";
 import PageHeader from "../components/PageHeader";
 import AvailabilityEditor from "../components/AvailabilityEditor";
+import AddressAutocomplete from "../components/AddressAutocomplete";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
@@ -146,7 +147,7 @@ export default function TherapistsPage() {
               <div><Label>Capacity (hrs/week)</Label><Input data-testid="t-capacity" type="number" step="0.5" value={form.capacity_hours_per_week} onChange={(e)=>setForm({...form,capacity_hours_per_week:e.target.value})}/></div>
             </div>
             <div><Label>Skills (comma separated)</Label><Input data-testid="t-skills" value={Array.isArray(form.skills) ? form.skills.join(", ") : form.skills} onChange={(e)=>setForm({...form,skills:e.target.value})} placeholder="ABA, Autism, Speech, Trauma"/></div>
-            <div><Label>Home address</Label><Input data-testid="t-address" required value={form.home_address} onChange={(e)=>setForm({...form,home_address:e.target.value})} placeholder="123 Main St, Los Angeles, CA"/></div>
+            <div><Label>Home address</Label><AddressAutocomplete testId="t-address" value={form.home_address} onChange={(v)=>setForm({...form,home_address:v})} required placeholder="Start typing an address…"/></div>
             <div className="flex items-center gap-2"><input id="t-weekend" data-testid="t-weekend" type="checkbox" checked={form.weekend_available} onChange={(e)=>setForm({...form,weekend_available:e.target.checked})} className="w-4 h-4 rounded border-soft"/><Label htmlFor="t-weekend" className="cursor-pointer">Available on weekends</Label></div>
             <div><Label>Weekly availability</Label><AvailabilityEditor value={form.availability} onChange={(v)=>setForm({...form,availability:v})}/></div>
             <div className="flex justify-end gap-2 pt-2">

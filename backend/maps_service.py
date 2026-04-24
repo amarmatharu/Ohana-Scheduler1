@@ -89,3 +89,30 @@ def haversine_km(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     dlon = lon2 - lon1
     aa = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     return 2 * 6371.0 * asin(sqrt(aa))
+
+
+
+async def places_autocomplete(input_text: str) -> list:
+    """Return list of {description, place_id} suggestions for an address fragment."""
+    if not input_text or not _key():
+        return []
+    url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+    params = {
+        "input": input_text,
+        "types": "address",
+        "key": _key(),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(url, params=params)
+            data = r.json()
+        if data.get("status") in ("OK", "ZERO_RESULTS"):
+            return [
+                {"description": p["description"], "place_id": p["place_id"]}
+                for p in data.get("predictions", [])
+            ]
+        else:
+            print(f"[places_autocomplete] status={data.get('status')} error={data.get('error_message')}")
+    except Exception as e:
+        print(f"[places_autocomplete] error: {e}")
+    return []

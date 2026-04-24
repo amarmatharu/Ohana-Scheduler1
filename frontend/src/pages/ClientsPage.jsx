@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, formatApiError } from "../lib/api";
 import PageHeader from "../components/PageHeader";
 import AvailabilityEditor from "../components/AvailabilityEditor";
+import AddressAutocomplete from "../components/AddressAutocomplete";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
@@ -168,7 +169,7 @@ export default function ClientsPage() {
               </div>
               <div><Label>Needed hours / week</Label><Input data-testid="c-needed-hours" type="number" step="0.5" value={form.needed_hours_per_week} onChange={(e)=>setForm({...form,needed_hours_per_week:e.target.value})}/></div>
             </div>
-            <div><Label>Home address</Label><Input data-testid="c-address" required value={form.home_address} onChange={(e)=>setForm({...form,home_address:e.target.value})} placeholder="456 Oak Ave, Los Angeles, CA"/></div>
+            <div><Label>Home address</Label><AddressAutocomplete testId="c-address" value={form.home_address} onChange={(v)=>setForm({...form,home_address:v})} required placeholder="Start typing an address…"/></div>
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
