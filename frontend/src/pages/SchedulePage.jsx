@@ -6,7 +6,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, ChevronLeft, ChevronRight, AlertTriangle, Coffee, Car } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, AlertTriangle, Coffee, Car, Download } from "lucide-react";
 
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const HOURS = Array.from({length: 14}, (_, i) => 8 + i); // 8am..9pm
@@ -104,6 +104,18 @@ export default function SchedulePage() {
             {therapists.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <div className="flex items-center gap-2 ml-auto">
+            <Button
+              data-testid="export-ics-btn"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const url = `${process.env.REACT_APP_BACKEND_URL}/api/sessions/export.ics?therapist_id=${therapistId}`;
+                window.open(url, "_blank");
+              }}
+              disabled={!therapistId}
+            >
+              <Download size={14} className="mr-1"/> Export .ics
+            </Button>
             <Button variant="outline" size="sm" data-testid="week-prev" onClick={()=>setWeekStart(addDays(weekStart, -7))}><ChevronLeft size={14}/></Button>
             <div className="font-mono text-sm px-2" data-testid="week-label">{iso(weekStart)} → {iso(weekEnd)}</div>
             <Button variant="outline" size="sm" data-testid="week-next" onClick={()=>setWeekStart(addDays(weekStart, 7))}><ChevronRight size={14}/></Button>

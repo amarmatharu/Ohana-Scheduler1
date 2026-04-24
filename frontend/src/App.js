@@ -12,6 +12,7 @@ import ClientsPage from "@/pages/ClientsPage";
 import MatchingPage from "@/pages/MatchingPage";
 import SchedulePage from "@/pages/SchedulePage";
 import InsurancePage from "@/pages/InsurancePage";
+import MapPage from "@/pages/MapPage";
 import TherapistPortal from "@/pages/TherapistPortal";
 import ClientPortal from "@/pages/ClientPortal";
 import { Toaster } from "@/components/ui/sonner";
@@ -40,6 +41,7 @@ function App() {
             <Route path="/admin/matching" element={<MatchingPage />} />
             <Route path="/admin/schedule" element={<SchedulePage />} />
             <Route path="/admin/insurance" element={<InsurancePage />} />
+            <Route path="/admin/map" element={<MapPage />} />
           </Route>
 
           <Route element={<ProtectedRoute roles={["therapist"]}><Layout /></ProtectedRoute>}>

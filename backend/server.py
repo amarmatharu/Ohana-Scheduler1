@@ -25,6 +25,8 @@ from auth import build_auth_router, seed_admin, hash_password
 from maps_service import geocode
 from matching import match_therapists_for_client
 from scheduling import validate_new_block, compute_session_flags, hours_scheduled
+from ics_export import build_ics
+from fastapi.responses import Response as FastResponse
 
 
 # ---- DB ----
@@ -276,6 +278,58 @@ async def dashboard_stats(admin: dict = Depends(require_role("admin"))):
         "upcoming_sessions": upcoming,
         "unassigned_clients": unassigned,
     }
+
+
+# ================= Map (locations) =================
+@api.get("/locations")
+async def locations(admin: dict = Depends(require_role("admin"))):
+    """Return therapist + client geocoded locations for the map view."""
+    therapists = await db.therapists.find({}, {"_id": 0, "id": 1, "name": 1, "lat": 1, "lng": 1, "skill_level": 1, "home_address": 1, "current_caseload_hours": 1, "capacity_hours_per_week": 1}).to_list(1000)
+    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1, "lat": 1, "lng": 1, "age_group": 1, "home_address": 1, "needed_hours_per_week": 1, "scheduled_hours_per_week": 1, "assigned_therapist_ids": 1}).to_list(1000)
+    return {
+        "therapists": [t for t in therapists if t.get("lat") is not None],
+        "clients": [c for c in clients if c.get("lat") is not None],
+    }
+
+
+# ================= ICS Calendar Export =================
+async def _ics_response(filename: str, sessions: list):
+    therapists = await db.therapists.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    t_lookup = {t["id"]: t["name"] for t in therapists}
+    c_lookup = {c["id"]: c["name"] for c in clients}
+    ics = build_ics("Ohana Scheduler", sessions, t_lookup, c_lookup)
+    return FastResponse(
+        content=ics,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.ics"'},
+    )
+
+
+@api.get("/sessions/export.ics")
+async def export_sessions_ics(
+    therapist_id: Optional[str] = None,
+    client_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    query: dict = {}
+    if user["role"] == "therapist":
+        query["therapist_id"] = user.get("linked_profile_id") or "__none__"
+        filename = f"ohana-therapist-{user.get('linked_profile_id', 'me')}"
+    elif user["role"] == "client":
+        query["client_id"] = user.get("linked_profile_id") or "__none__"
+        filename = f"ohana-client-{user.get('linked_profile_id', 'me')}"
+    else:
+        if therapist_id:
+            query["therapist_id"] = therapist_id
+            filename = f"ohana-therapist-{therapist_id}"
+        elif client_id:
+            query["client_id"] = client_id
+            filename = f"ohana-client-{client_id}"
+        else:
+            filename = "ohana-all-sessions"
+    sessions = await db.sessions.find(query, {"_id": 0}).sort("date", 1).to_list(2000)
+    return await _ics_response(filename, sessions)
 
 
 app.include_router(api)

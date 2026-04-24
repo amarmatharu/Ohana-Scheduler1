@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import PageHeader from "../components/PageHeader";
+import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
+import { Download } from "lucide-react";
 
 export default function ClientPortal() {
   const { user } = useAuth();
@@ -16,9 +18,22 @@ export default function ClientPortal() {
     })();
   }, []);
 
+  const exportIcs = () => {
+    const url = `${process.env.REACT_APP_BACKEND_URL}/api/sessions/export.ics`;
+    window.open(url, "_blank");
+  };
+
   return (
     <div>
-      <PageHeader title="My appointments" subtitle={`Welcome, ${user?.name}`} />
+      <PageHeader
+        title="My appointments"
+        subtitle={`Welcome, ${user?.name}`}
+        action={
+          <Button data-testid="client-export-ics" variant="outline" onClick={exportIcs}>
+            <Download size={14} className="mr-1.5"/> Export to calendar (.ics)
+          </Button>
+        }
+      />
       <div className="px-10 pb-10 space-y-4">
         {!user?.linked_profile_id && (
           <div className="bg-[#FDF4E7] border border-[#E3C68B] rounded-md p-4 text-sm text-[#7A5B2E]" data-testid="no-profile-warning">
