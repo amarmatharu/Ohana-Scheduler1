@@ -1,7 +1,8 @@
 /**
  * Mini weekly preview — visualizes proposed_blocks across a Mon-Sun grid.
- * Optional `existingBlocks` are rendered in a muted, striped style behind/alongside proposed blocks
- * so the admin sees the therapist's full week context.
+ * Optional `existingBlocks` are rendered in a muted, striped style.
+ * Click any block (existing or proposed) to see details in the parent component
+ * via the optional `onBlockClick(block, kind)` callback.
  */
 import React from "react";
 
@@ -25,7 +26,12 @@ function blockHeight(start, end) {
   return ((eh - sh) + (em - sm) / 60) * HOUR_HEIGHT;
 }
 
-export default function WeeklyPreview({ blocks = [], existingBlocks = [], therapists = [] }) {
+export default function WeeklyPreview({
+  blocks = [],
+  existingBlocks = [],
+  therapists = [],
+  onBlockClick,
+}) {
   const therapistColor = {};
   therapists.forEach((t, i) => {
     therapistColor[t.therapist_id] = PALETTE[i % PALETTE.length];
@@ -60,18 +66,18 @@ export default function WeeklyPreview({ blocks = [], existingBlocks = [], therap
         {DAYS.map((_, dayIdx) => {
           const proposed = proposedByDay[dayIdx] || [];
           const existing = existingByDay[dayIdx] || [];
-          // Proposed blocks take the right half, existing the left half if both present on same day
           return (
             <div key={dayIdx} className="relative border-l border-soft">
               {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i).map((i) => (
                 <div key={i} style={{ height: HOUR_HEIGHT }} className="border-b border-[#EEEAE0]" />
               ))}
 
-              {/* Existing blocks (muted, striped) */}
               {existing.map((b, i) => (
-                <div
+                <button
+                  type="button"
                   key={`ex-${i}`}
                   data-testid={`preview-existing-${dayIdx}-${i}`}
+                  onClick={() => onBlockClick && onBlockClick(b, "existing")}
                   title={`Existing: ${b.client_name} · ${b.start}-${b.end}`}
                   style={{
                     top: blockTop(b.start),
@@ -81,20 +87,21 @@ export default function WeeklyPreview({ blocks = [], existingBlocks = [], therap
                     backgroundImage: "repeating-linear-gradient(135deg, #DCE3E0 0 6px, #E5EBE8 6px 12px)",
                     borderLeft: "3px solid #A1ACA6",
                   }}
-                  className="absolute rounded-sm text-[#586960] text-[9px] px-1 py-0.5 overflow-hidden"
+                  className="absolute rounded-sm text-[#586960] text-[9px] px-1 py-0.5 overflow-hidden cursor-pointer hover:ring-2 hover:ring-[#274f38]/20 transition-shadow text-left"
                 >
                   <div className="font-mono">{b.start}–{b.end}</div>
                   <div className="truncate text-[8px] uppercase tracking-wider opacity-80">{b.client_name}</div>
-                </div>
+                </button>
               ))}
 
-              {/* Proposed blocks */}
               {proposed.map((b, i) => {
                 const color = therapistColor[b.therapist_id] || PALETTE[0];
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={`pr-${i}`}
                     data-testid={`preview-block-${dayIdx}-${i}`}
+                    onClick={() => onBlockClick && onBlockClick(b, "proposed")}
                     style={{
                       top: blockTop(b.start),
                       height: blockHeight(b.start, b.end),
@@ -103,11 +110,11 @@ export default function WeeklyPreview({ blocks = [], existingBlocks = [], therap
                       backgroundColor: color.bg,
                       borderLeft: `3px solid ${color.border}`,
                     }}
-                    className="absolute rounded-sm text-white text-[10px] px-1.5 py-1 overflow-hidden shadow-sm"
+                    className="absolute rounded-sm text-white text-[10px] px-1.5 py-1 overflow-hidden shadow-sm cursor-pointer hover:brightness-110 transition-all text-left"
                   >
                     <div className="font-mono">{b.start}–{b.end}</div>
                     <div className="truncate text-white/90 text-[9px]">{b.therapist_name}</div>
-                  </div>
+                  </button>
                 );
               })}
             </div>

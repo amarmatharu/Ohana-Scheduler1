@@ -8,8 +8,9 @@ import { Input } from "../components/ui/input";
 import { toast } from "sonner";
 import {
   GitMerge, MapPin, Heart, CheckCircle2, AlertTriangle, Sparkles,
-  UserPlus, Clock, Award, Car, CalendarCheck, Users
+  UserPlus, Clock, Award, Car, CalendarCheck, Users, X, Filter
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 
 function nextMonday() {
   const d = new Date();
@@ -134,6 +135,9 @@ export default function MatchingPage() {
   const [selectedOptionKey, setSelectedOptionKey] = useState(null);
   const [weekStart, setWeekStart] = useState(nextMonday());
   const [confirming, setConfirming] = useState(false);
+  const [therapistFilter, setTherapistFilter] = useState("all"); // "all" | therapist_id
+  const [blockDetail, setBlockDetail] = useState(null); // {block, kind, clientDetails?}
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -190,12 +194,44 @@ export default function MatchingPage() {
       });
       const skipped = data.skipped?.length || 0;
       toast.success(`Scheduled ${data.created} session${data.created !== 1 ? "s" : ""}${skipped ? ` (${skipped} skipped due to conflicts)` : ""}`);
-      // refresh smart match to show new state
       run();
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || e.message);
     } finally {
       setConfirming(false);
+    }
+  };
+
+  // Reset filter whenever a new option is selected
+  useEffect(() => {
+    setTherapistFilter("all");
+  }, [selectedOptionKey]);
+
+  const filteredProposed = useMemo(() => {
+    if (!selectedOption) return [];
+    if (therapistFilter === "all") return selectedOption.proposed_blocks;
+    return selectedOption.proposed_blocks.filter(b => b.therapist_id === therapistFilter);
+  }, [selectedOption, therapistFilter]);
+
+  const filteredExisting = useMemo(() => {
+    if (!selectedOption) return [];
+    const all = selectedOption.existing_blocks || [];
+    if (therapistFilter === "all") return all;
+    return all.filter(b => b.therapist_id === therapistFilter);
+  }, [selectedOption, therapistFilter]);
+
+  const handleBlockClick = async (block, kind) => {
+    setBlockDetail({ block, kind, clientDetails: null });
+    if (kind === "existing" && block.client_id) {
+      setLoadingDetail(true);
+      try {
+        const { data } = await api.get(`/clients/${block.client_id}`);
+        setBlockDetail({ block, kind, clientDetails: data });
+      } catch {
+        // ignore — show what we have
+      } finally {
+        setLoadingDetail(false);
+      }
     }
   };
 
@@ -330,7 +366,7 @@ export default function MatchingPage() {
 
                     {selectedOption ? (
                       <>
-                        <div className="mb-3 flex flex-wrap gap-3 text-xs">
+                        <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
                           {selectedOption.therapists.map((t, i) => {
                             const colors = ["#274f38", "#B07C60", "#7B968B"];
                             return (
@@ -350,10 +386,43 @@ export default function MatchingPage() {
                             </span>
                           )}
                         </div>
+
+                        {selectedOption.therapists.length > 1 && (
+                          <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="therapist-filter-chips">
+                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-ohana"><Filter size={11} /> Show:</span>
+                            <button
+                              type="button"
+                              data-testid="filter-chip-all"
+                              onClick={() => setTherapistFilter("all")}
+                              className={`text-[11px] px-2.5 py-1 rounded-full transition-colors ${therapistFilter === "all" ? "bg-[#274f38] text-white" : "bg-[#F0EFEA] text-[#586960] hover:bg-[#E5EBE8]"}`}
+                            >
+                              All therapists
+                            </button>
+                            {selectedOption.therapists.map((t, i) => {
+                              const colors = ["#274f38", "#B07C60", "#7B968B"];
+                              const active = therapistFilter === t.therapist_id;
+                              return (
+                                <button
+                                  type="button"
+                                  key={t.therapist_id}
+                                  data-testid={`filter-chip-${t.therapist_id}`}
+                                  onClick={() => setTherapistFilter(t.therapist_id)}
+                                  style={active ? { backgroundColor: colors[i % colors.length], color: "white" } : undefined}
+                                  className={`text-[11px] px-2.5 py-1 rounded-full transition-colors flex items-center gap-1.5 ${!active && "bg-[#F0EFEA] text-[#586960] hover:bg-[#E5EBE8]"}`}
+                                >
+                                  {!active && <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }}></span>}
+                                  {t.therapist_name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
                         <WeeklyPreview
-                          blocks={selectedOption.proposed_blocks}
-                          existingBlocks={selectedOption.existing_blocks || []}
+                          blocks={filteredProposed}
+                          existingBlocks={filteredExisting}
                           therapists={selectedOption.therapists}
+                          onBlockClick={handleBlockClick}
                         />
                       </>
                     ) : (
@@ -406,6 +475,72 @@ export default function MatchingPage() {
           </div>
         )}
       </div>
+
+      {/* Block detail dialog */}
+      <Dialog open={!!blockDetail} onOpenChange={(o) => !o && setBlockDetail(null)}>
+        <DialogContent className="max-w-md bg-white" data-testid="block-detail-dialog">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "Outfit" }}>
+              {blockDetail?.kind === "existing" ? "Existing booking" : "Proposed session"}
+            </DialogTitle>
+          </DialogHeader>
+          {blockDetail && (
+            <div className="space-y-4 text-sm pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Day</div>
+                  <div className="font-medium mt-1">{blockDetail.block.day_label}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Time</div>
+                  <div className="font-mono mt-1">{blockDetail.block.start} – {blockDetail.block.end}</div>
+                </div>
+              </div>
+
+              {blockDetail.kind === "existing" ? (
+                <>
+                  <div className="border-t border-soft pt-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Client</div>
+                    {loadingDetail && <div className="text-xs text-muted-ohana">Loading details…</div>}
+                    {blockDetail.clientDetails ? (
+                      <div className="space-y-2">
+                        <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>{blockDetail.clientDetails.name}</div>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                          <div><span className="text-muted-ohana">Age group:</span> <span className="capitalize">{blockDetail.clientDetails.age_group}</span></div>
+                          <div><span className="text-muted-ohana">Skill required:</span> <span className="capitalize">{blockDetail.clientDetails.skill_required}</span></div>
+                          <div><span className="text-muted-ohana">Gender pref:</span> <span className="capitalize">{(blockDetail.clientDetails.gender_preference || "").replace("_", " ")}</span></div>
+                          <div><span className="text-muted-ohana">Hours:</span> <span className="font-mono">{blockDetail.clientDetails.scheduled_hours_per_week || 0}/{blockDetail.clientDetails.needed_hours_per_week} hr/wk</span></div>
+                        </div>
+                        {blockDetail.clientDetails.home_address && (
+                          <div className="text-xs text-muted-ohana inline-flex items-start gap-1.5"><MapPin size={12} className="mt-0.5 shrink-0" />{blockDetail.clientDetails.home_address}</div>
+                        )}
+                        {blockDetail.clientDetails.insurance?.plan && (
+                          <div className="text-xs"><span className="text-muted-ohana">Insurance:</span> {blockDetail.clientDetails.insurance.plan} · {blockDetail.clientDetails.insurance.authorized_hours_per_week} hr authorized</div>
+                        )}
+                      </div>
+                    ) : (
+                      !loadingDetail && (
+                        <div className="text-base font-medium">{blockDetail.block.client_name}</div>
+                      )
+                    )}
+                  </div>
+                  <div className="bg-[#FDF4E7] border border-[#E3C68B] text-[#7A5B2E] text-xs rounded-md p-3">
+                    This time slot is already booked. The matcher routed around it automatically.
+                  </div>
+                </>
+              ) : (
+                <div className="border-t border-soft pt-4">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Therapist</div>
+                  <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>{blockDetail.block.therapist_name}</div>
+                  <div className="font-mono text-xs text-muted-ohana mt-1">
+                    {blockDetail.block.hours} hr block
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
