@@ -1,17 +1,23 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api, formatApiError } from "../lib/api";
+import { api, formatApiError, getToken, setToken } from "../lib/api";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // null while loading, false if unauth
+  const [user, setUser] = useState(null); // null=loading, false=unauth, object=user
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setUser(false);
+      setLoading(false);
+      return;
+    }
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
     } catch {
+      setToken(null);
       setUser(false);
     } finally {
       setLoading(false);
@@ -44,6 +50,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch {}
+    setToken(null);
     setUser(false);
   };
 

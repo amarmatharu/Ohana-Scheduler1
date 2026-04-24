@@ -103,6 +103,9 @@ def build_auth_router(db):
             if auth.startswith("Bearer "):
                 token = auth[7:]
         if not token:
+            # Allow ?token= query param for file downloads (window.open can't send headers)
+            token = request.query_params.get("token")
+        if not token:
             raise HTTPException(status_code=401, detail="Not authenticated")
         try:
             payload = jwt.decode(token, _secret(), algorithms=[JWT_ALGORITHM])
@@ -146,6 +149,7 @@ def build_auth_router(db):
         access = create_access_token(user_id, email, body.role)
         refresh = create_refresh_token(user_id)
         _set_cookies(response, access, refresh)
+        response.headers["X-Access-Token"] = access
         await _log_audit(user_id, "register", {"role": body.role})
         return UserPublic(id=user_id, email=email, name=body.name, role=body.role)
 
@@ -163,6 +167,7 @@ def build_auth_router(db):
         access = create_access_token(user["id"], user["email"], user["role"])
         refresh = create_refresh_token(user["id"])
         _set_cookies(response, access, refresh)
+        response.headers["X-Access-Token"] = access
         await _log_audit(user["id"], "login", {"ip": ip})
         return UserPublic(
             id=user["id"],

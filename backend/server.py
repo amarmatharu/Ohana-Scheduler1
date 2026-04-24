@@ -41,10 +41,11 @@ app = FastAPI(title="Ohana Scheduler")
 _frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[_frontend_url, "http://localhost:3000"],
+    allow_origin_regex=r"https://.*\.emergentagent\.com|http://localhost:3000",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Access-Token"],
 )
 
 auth_router, get_current_user, require_role = build_auth_router(db)

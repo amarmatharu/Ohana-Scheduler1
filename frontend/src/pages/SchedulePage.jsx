@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api, formatApiError } from "../lib/api";
+import { getToken } from "../lib/api";
 import PageHeader from "../components/PageHeader";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -109,7 +110,8 @@ export default function SchedulePage() {
               variant="outline"
               size="sm"
               onClick={() => {
-                const url = `${process.env.REACT_APP_BACKEND_URL}/api/sessions/export.ics?therapist_id=${therapistId}`;
+                const token = getToken();
+                const url = `${process.env.REACT_APP_BACKEND_URL}/api/sessions/export.ics?therapist_id=${therapistId}&token=${encodeURIComponent(token || "")}`;
                 window.open(url, "_blank");
               }}
               disabled={!therapistId}
