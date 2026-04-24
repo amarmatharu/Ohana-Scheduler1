@@ -1,115 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-    margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+:root {
+    /* Ohana Earthy palette */
+    --bg-base: #F9F8F5;
+    --bg-surface: #FFFFFF;
+    --bg-muted: #F0EFEA;
+    --primary: #274f38;
+    --primary-hover: #1E3D2B;
+    --primary-muted: #E5EBE8;
+    --secondary: #B07C60;
+    --accent: #7B968B;
+    --accent-light: #DCE3E0;
+    --text-primary: #18231E;
+    --text-secondary: #586960;
+    --text-disabled: #A1ACA6;
+    --border-default: #E3DFD5;
+    --status-success: #477A5E;
+    --status-warning: #D69F4A;
+    --status-error: #B85C5C;
+    --status-info: #4A789C;
 }
 
 @layer base {
     :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
+        --background: 44 25% 97%;
+        --foreground: 150 15% 12%;
         --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
+        --card-foreground: 150 15% 12%;
         --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
+        --popover-foreground: 150 15% 12%;
+        --primary: 142 33% 23%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 44 16% 93%;
+        --secondary-foreground: 150 15% 12%;
+        --muted: 44 16% 93%;
+        --muted-foreground: 147 8% 38%;
+        --accent: 150 11% 54%;
+        --accent-foreground: 150 15% 12%;
+        --destructive: 0 38% 54%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 42 20% 86%;
+        --input: 42 20% 86%;
+        --ring: 142 33% 23%;
         --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
     }
 }
 
 @layer base {
     * {
-        @apply border-border;
+        border-color: hsl(var(--border));
     }
-    body {
-        @apply bg-background text-foreground;
+    html, body {
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+        font-family: 'Manrope', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, h4, h5 {
+        font-family: 'Outfit', system-ui, sans-serif;
+        letter-spacing: -0.01em;
+    }
+    .font-mono, code, .font-mono * {
+        font-family: 'JetBrains Mono', monospace;
+    }
+    ::selection {
+        background: var(--primary);
+        color: white;
     }
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
-
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+@layer utilities {
+    .text-primary-ohana { color: var(--primary); }
+    .bg-primary-ohana { background-color: var(--primary); }
+    .bg-base { background-color: var(--bg-base); }
+    .bg-surface { background-color: var(--bg-surface); }
+    .bg-muted-soft { background-color: var(--bg-muted); }
+    .border-soft { border-color: var(--border-default); }
+    .text-muted-ohana { color: var(--text-secondary); }
+    .card-shadow { box-shadow: 0 2px 8px rgba(24,35,30,0.04); }
+    .card-shadow-hover:hover { box-shadow: 0 12px 32px rgba(24,35,30,0.08); }
 }
+
+/* Scrollbar polish */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-muted); }
+::-webkit-scrollbar-thumb { background: var(--accent-light); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }

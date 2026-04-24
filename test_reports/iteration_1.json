@@ -1,0 +1,39 @@
+{
+  "summary": "First-run review of Ohana Scheduler. 19/19 backend pytest cases passed (auth, therapists CRUD+geocode, clients CRUD+geocode, matching with weighted scoring & drive_minutes, sessions with overlap/rest-break flags, scheduled_hours persistence, dashboard, RBAC). Frontend: login→admin redirect, all 4 stat cards, Therapists dialog + create, Clients dialog with insurance & services chips, Schedule grid render + therapist select, Insurance table, Logout. Matching page UI verified (select + run button) — results render when clients load in time.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/auth/login", "issue": "Brute-force lockout could not be exhaustively verified from single test client IP without polluting; single bad-password test returns 401 correctly. Threshold in auth.py is 5 (not 6) — aligns with playbook but review request text said 6."},
+      {"endpoint": "/api/sessions", "issue": "Insurance authorized-hours guard compares projected weekly to authorized*4 (4-week window), so typical single-week additions won't warn. Logic correct but may under-warn for real-time weekly limit."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "MatchingPage & SchedulePage select dropdowns", "issues": ["React hydration warning: <span> rendered as child of <option> (Emergent visual editor injects x-excluded span inside each <option>). Non-blocking but floods console with 'In HTML, %s cannot be a child of %s' warnings. Consider wrapping dynamic text to avoid visual editor span injection inside <option>."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix hydration warning caused by span inside <option> in MatchingPage and SchedulePage selects (visual editor injects span). Can be suppressed by using plain text children without template expressions or by configuring visual editor exclusion.",
+    "Confirm intended brute-force threshold is 5 (code) or 6 (review request). Update whichever is the source of truth.",
+    "Consider per-week (rather than 4-week) comparison for insurance authorized_hours_per_week guard, or document the rolling window explicitly."
+  ],
+  "critical_code_review_comments": [
+    "server.py: _clean() helper defined but unused after moving to {\"_id\": 0} projection; minor dead code.",
+    "server.py create_session: mutates therapist/client documents after inserting block but does not wrap in a transaction — if caseload update fails mid-flight, DB can become inconsistent. Low priority given MVP scope.",
+    "auth.py: brute_force_check threshold is 5 (not the 6 mentioned in review request). Uses ip:email identifier — good.",
+    "maps_service calls are live to Google. matching.py loops therapists, triggering N distance_matrix calls per /api/match. Cache on geocode exists but per-pair drive calls may cost quota; consider caching distance_matrix too.",
+    "Frontend Login/Client/Therapist dialogs open correctly only with regular click (Playwright force=True bypasses Radix trigger). Production users unaffected — tests must use regular click.",
+    "Dashboard useEffect swallows all errors with empty catch {} — silently hides 401 or API failures from developers."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "~90% — all critical flows verified; matching result render is timing-dependent in automated test"},
+  "test_credentials": "admin@ohana.health / Admin@Ohana2026 (from /app/memory/test_credentials.md, verified working)",
+  "seed_data_creation": "backend_test.py creates TEST_ prefixed therapist/client/user/session rows and cleans them up in TestZZCleanup. Some stray 'UI_Test_Therapist' / 'UI_Client_*' rows may remain from frontend Playwright runs.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Playwright note: Radix Dialog triggers (new-therapist-btn, new-client-btn, add-session-day-*) MUST be clicked WITHOUT force=True — force=True bypasses the Radix onPointerDown handler and dialog never opens. Also wait ~1.5-2s on /admin after login for stat cards to render, and wait for match-client-select options to populate (not just for the <select> itself) before selecting. Geocoding adds 2-4s to therapist/client save operations — use ≥5s wait for dialog close after Save. Backend seed admin password is enforced on every startup (updates hash if mismatch).",
+  "rca of the issue": "N/A — no blocking bugs. Minor: React hydration console warnings on pages with dynamic <option> text are caused by the Emergent visual editor injecting invisible <span data-ve-dynamic> inside each option. Reproduce: open /admin/matching, inspect console → 'In HTML, <span> cannot be a child of <option>'. Mitigation: render option text without template expressions that the visual editor wraps, or add the options to the editor's exclusion list."
+}

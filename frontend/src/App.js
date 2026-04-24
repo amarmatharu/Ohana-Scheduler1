@@ -1,53 +1,61 @@
-import { useEffect } from "react";
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import { AuthProvider, useAuth } from "@/context/AuthContext";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import Layout from "@/components/Layout";
+import Login from "@/pages/Login";
+import AdminDashboard from "@/pages/AdminDashboard";
+import TherapistsPage from "@/pages/TherapistsPage";
+import ClientsPage from "@/pages/ClientsPage";
+import MatchingPage from "@/pages/MatchingPage";
+import SchedulePage from "@/pages/SchedulePage";
+import InsurancePage from "@/pages/InsurancePage";
+import TherapistPortal from "@/pages/TherapistPortal";
+import ClientPortal from "@/pages/ClientPortal";
+import { Toaster } from "@/components/ui/sonner";
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
-
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
+function RoleRedirect() {
+  const { user, loading } = useAuth();
+  if (loading || user === null) return <div className="min-h-screen flex items-center justify-center bg-base"><span className="text-muted-ohana">Loading…</span></div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === "admin") return <Navigate to="/admin" replace />;
+  if (user.role === "therapist") return <Navigate to="/therapist" replace />;
+  if (user.role === "client") return <Navigate to="/client" replace />;
+  return <Navigate to="/login" replace />;
+}
 
 function App() {
   return (
-    <div className="App">
+    <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
+          <Route path="/login" element={<Login />} />
+
+          <Route element={<ProtectedRoute roles={["admin"]}><Layout /></ProtectedRoute>}>
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/therapists" element={<TherapistsPage />} />
+            <Route path="/admin/clients" element={<ClientsPage />} />
+            <Route path="/admin/matching" element={<MatchingPage />} />
+            <Route path="/admin/schedule" element={<SchedulePage />} />
+            <Route path="/admin/insurance" element={<InsurancePage />} />
           </Route>
+
+          <Route element={<ProtectedRoute roles={["therapist"]}><Layout /></ProtectedRoute>}>
+            <Route path="/therapist" element={<TherapistPortal />} />
+          </Route>
+
+          <Route element={<ProtectedRoute roles={["client"]}><Layout /></ProtectedRoute>}>
+            <Route path="/client" element={<ClientPortal />} />
+          </Route>
+
+          <Route path="/" element={<RoleRedirect />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <Toaster richColors position="top-right" />
       </BrowserRouter>
-    </div>
+    </AuthProvider>
   );
 }
 
