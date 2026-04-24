@@ -1,0 +1,145 @@
+{
+  "theme": "light",
+  "archetype": "1 - Organic & Earthy",
+  "design_philosophy": "Calm, professional, and trustworthy clinical interface. Focuses on data density without feeling cluttered. Uses matte surfaces, warm off-white backgrounds, and deep forest greens to reduce eye strain over long shifts.",
+  "colors": {
+    "background": {
+      "base": "#F9F8F5",
+      "surface": "#FFFFFF",
+      "surface_muted": "#F0EFEA",
+      "overlay": "rgba(24, 35, 30, 0.4)"
+    },
+    "primary": {
+      "DEFAULT": "#274f38",
+      "hover": "#1E3D2B",
+      "foreground": "#FFFFFF",
+      "muted": "#E5EBE8"
+    },
+    "secondary": {
+      "DEFAULT": "#B07C60",
+      "hover": "#946750",
+      "foreground": "#FFFFFF"
+    },
+    "accent": {
+      "DEFAULT": "#7B968B",
+      "foreground": "#18231E",
+      "light": "#DCE3E0"
+    },
+    "text": {
+      "primary": "#18231E",
+      "secondary": "#586960",
+      "disabled": "#A1ACA6"
+    },
+    "border": {
+      "DEFAULT": "#E3DFD5",
+      "focus": "#274F38"
+    },
+    "status": {
+      "success": "#477A5E",
+      "warning": "#D69F4A",
+      "error": "#B85C5C",
+      "info": "#4A789C"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "'Outfit', sans-serif",
+      "body": "'Manrope', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-medium",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-medium",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "h4": "text-lg font-medium",
+      "body": "text-base leading-relaxed",
+      "body_sm": "text-sm leading-relaxed",
+      "overline": "text-xs tracking-[0.2em] uppercase font-bold",
+      "time_mono": "text-sm font-mono tracking-tight"
+    }
+  },
+  "spacing": {
+    "section_gap": "gap-12 md:gap-16",
+    "component_gap": "gap-6",
+    "item_gap": "gap-3",
+    "card_padding": "p-6 sm:p-8",
+    "input_padding": "px-4 py-2.5"
+  },
+  "borders": {
+    "radius": {
+      "sm": "rounded-sm",
+      "md": "rounded-md",
+      "lg": "rounded-lg",
+      "full": "rounded-full"
+    },
+    "width": {
+      "default": "border",
+      "thick": "border-2"
+    }
+  },
+  "shadows": {
+    "sm": "shadow-sm",
+    "md": "shadow-md",
+    "card": "shadow-[0_2px_8px_rgba(24,35,30,0.04)]",
+    "floating": "shadow-[0_12px_32px_rgba(24,35,30,0.08)]"
+  },
+  "components": {
+    "card": {
+      "base": "bg-white border border-[#E3DFD5] rounded-lg shadow-[0_2px_8px_rgba(24,35,30,0.04)] overflow-hidden",
+      "hover": "hover:shadow-[0_8px_24px_rgba(24,35,30,0.06)] hover:-translate-y-0.5 transition-all duration-300"
+    },
+    "button": {
+      "primary": "bg-[#274f38] text-white hover:bg-[#1E3D2B] rounded-md font-medium px-5 py-2.5 transition-colors",
+      "secondary": "bg-[#E5EBE8] text-[#274f38] hover:bg-[#DCE3E0] rounded-md font-medium px-5 py-2.5 transition-colors",
+      "outline": "border border-[#E3DFD5] text-[#18231E] hover:border-[#274F38] hover:text-[#274F38] rounded-md font-medium px-5 py-2.5 transition-all"
+    },
+    "input": {
+      "base": "bg-[#FFFFFF] border border-[#E3DFD5] rounded-md text-[#18231E] placeholder-[#A1ACA6] focus:border-[#274F38] focus:ring-1 focus:ring-[#274F38] transition-all"
+    },
+    "badge": {
+      "base": "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#F0EFEA] text-[#586960]",
+      "success": "bg-[#E8F0EA] text-[#274F38]",
+      "warning": "bg-[#FDF4E7] text-[#B07C60]"
+    }
+  },
+  "layout_strategies": {
+    "admin_dashboard": "Control Room Grid. Base grid-cols-1 md:grid-cols-3 lg:grid-cols-4. Tight gap (gap-6). Use full height widgets.",
+    "schedule_builder": "Grid-based timeline view. Horizontal scrolling for days, vertical for time. Use JetBrains Mono for times. Highlight breaks in muted terracotta (#FDF4E7).",
+    "matching_engine": "List view with progressive disclosure. Proximity score visualised as a mini health-bar next to skill alignment.",
+    "client_intake": "Centered narrow container (max-w-2xl). Multi-step form with sticky bottom action bar. Generous vertical spacing between form groups."
+  },
+  "motion": {
+    "hover": "transition-all duration-200 ease-in-out",
+    "enter": "animate-in fade-in slide-in-from-bottom-4 duration-500",
+    "page_transition": "animate-in fade-in duration-300"
+  },
+  "media": {
+    "images": [
+      {
+        "url": "https://images.pexels.com/photos/7789604/pexels-photo-7789604.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Clean and organized medical office desk, perfect for healthcare settings.",
+        "category": "auth_background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1763734313272-f06e0d4c1239?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzF8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHNhbmQlMjBzYWdlJTIwZ3JlZW4lMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc3NzA2NTA4OXww&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract patterned texture with organic shapes.",
+        "category": "hero_accent"
+      },
+      {
+        "url": "https://images.pexels.com/photos/7699407/pexels-photo-7699407.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "A woman in therapy, modern office setting.",
+        "category": "portal_hero"
+      }
+    ],
+    "icons": "Use lucide-react. Prefer clean, unbroken lines (stroke-width: 1.5). For complex dashboard actions, use subtle dual-tone if supported."
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette. DO NOT USE ANY BLUE, PURPLE, OR TEAL (#1B93A4) for components. Use the Deep Forest green (#274F38) as the primary brand color.",
+    "Ensure all interactive elements and major data points include 'data-testid' attributes (e.g., data-testid='schedule-block-3pm').",
+    "Use Shadcn components for forms, tabs, and modals, but customize them to match the muted earthy tone (remove sharp black borders, use #E3DFD5 instead).",
+    "For the Map View, use a simple grid layout or a mock container with an SVG icon if a map library isn't available. Avoid complex Google Maps if not necessary; a static UI with coordinates is fine for MVP.",
+    "Implement the Block Schedule Builder using CSS Grid, ensuring accurate sizing for 30-min increments. Add a red/terracotta visual block for 'Rest Break Required' when a shift exceeds 3.5 hours.",
+    "Use JetBrains Mono or monospace styling for any time inputs, duration bars, or schedule grids to ensure clear readability.",
+    "Avoid Inter for headings. Use Outfit or Manrope."
+  ]
+}
