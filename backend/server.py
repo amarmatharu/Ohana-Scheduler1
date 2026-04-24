@@ -7,7 +7,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Response, Request
@@ -24,6 +24,7 @@ from models import (
 from auth import build_auth_router, seed_admin, hash_password
 from maps_service import geocode, places_autocomplete
 from matching import match_therapists_for_client
+from smart_matching import smart_match
 from scheduling import validate_new_block, compute_session_flags, hours_scheduled
 from ics_export import build_ics
 from fastapi.responses import Response as FastResponse
@@ -164,6 +165,90 @@ async def match_for_client(body: MatchRequest, user: dict = Depends(require_role
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return await match_therapists_for_client(db, client, body.max_results)
+
+
+@api.post("/match/smart")
+async def match_smart(body: MatchRequest, user: dict = Depends(require_role("admin"))):
+    client = await db.clients.find_one({"id": body.client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return await smart_match(db, client)
+
+
+@api.post("/match/confirm")
+async def match_confirm(payload: dict, user: dict = Depends(require_role("admin"))):
+    """Apply a smart-match option: create session blocks for each proposed_blocks entry.
+
+    Body: {client_id, week_start_date (YYYY-MM-DD), proposed_blocks: [{therapist_id, day, start, end}, ...]}
+    """
+    client_id = payload.get("client_id")
+    week_start = payload.get("week_start_date")
+    proposed = payload.get("proposed_blocks") or []
+    if not client_id or not week_start or not proposed:
+        raise HTTPException(status_code=400, detail="client_id, week_start_date, and proposed_blocks are required.")
+    try:
+        ws = datetime.strptime(week_start, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="week_start_date must be YYYY-MM-DD")
+
+    created = []
+    skipped = []
+    therapist_ids = set()
+    for blk in proposed:
+        try:
+            day = int(blk["day"])
+            session_date = (ws + timedelta(days=day)).isoformat()
+            therapist_id = blk["therapist_id"]
+            new_block = {
+                "therapist_id": therapist_id,
+                "client_id": client_id,
+                "date": session_date,
+                "start_time": blk["start"],
+                "end_time": blk["end"],
+                "notes": blk.get("notes"),
+            }
+            existing = await db.sessions.find(
+                {"therapist_id": therapist_id, "date": session_date, "status": {"$ne": "cancelled"}},
+                {"_id": 0},
+            ).to_list(100)
+            errors, warnings, travel = validate_new_block(new_block, existing)
+            if errors:
+                skipped.append({"block": new_block, "errors": errors})
+                continue
+            rest, lunch = compute_session_flags(new_block)
+            block = SessionBlock(
+                **new_block,
+                rest_break_required=rest,
+                lunch_break_required=lunch,
+                travel_minutes_before=travel,
+            )
+            await db.sessions.insert_one(block.model_dump())
+            therapist_ids.add(therapist_id)
+            created.append(block.model_dump())
+        except Exception as e:
+            skipped.append({"block": blk, "errors": [str(e)]})
+
+    # update relationships
+    for tid in therapist_ids:
+        await db.therapists.update_one(
+            {"id": tid},
+            {"$addToSet": {"active_client_ids": client_id}},
+        )
+    if therapist_ids:
+        await db.clients.update_one(
+            {"id": client_id},
+            {"$addToSet": {"assigned_therapist_ids": {"$each": list(therapist_ids)}}},
+        )
+    # recompute caseload hours
+    for tid in therapist_ids:
+        all_t = await db.sessions.find({"therapist_id": tid, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(500)
+        weekly = hours_scheduled(all_t) / 4.0 if all_t else 0
+        await db.therapists.update_one({"id": tid}, {"$set": {"current_caseload_hours": round(weekly, 2)}})
+    all_c = await db.sessions.find({"client_id": client_id, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(500)
+    cw = hours_scheduled(all_c) / 4.0 if all_c else 0
+    await db.clients.update_one({"id": client_id}, {"$set": {"scheduled_hours_per_week": round(cw, 2)}})
+
+    return {"created": len(created), "skipped": skipped, "sessions": created}
 
 
 # ================= Sessions / Schedule =================
