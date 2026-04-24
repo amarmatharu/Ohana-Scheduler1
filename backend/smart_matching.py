@@ -1,6 +1,6 @@
 """Smart matching: availability-based, tries single therapist first then multi-therapist combos."""
 from typing import List, Optional
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from maps_service import distance_matrix, haversine_km
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -125,6 +125,50 @@ def _existing_blocks_by_day(sessions, week_start_date: Optional[date] = None):
     return by_day
 
 
+async def _existing_blocks_for_preview(db, therapist_id: str, exclude_client_id: Optional[str] = None):
+    """Return a recurring-weekly view of the therapist's existing future sessions, grouped by day-of-week.
+    Each block: {day, day_label, start, end, client_id, client_name, is_existing: True}.
+    `exclude_client_id` is omitted (typically the client we're matching for, since their sessions are 'replaced')."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    sessions = await db.sessions.find(
+        {"therapist_id": therapist_id, "status": {"$ne": "cancelled"}, "date": {"$gte": today}},
+        {"_id": 0},
+    ).sort("date", 1).to_list(500)
+
+    # Get unique client names referenced
+    client_ids = {s["client_id"] for s in sessions}
+    client_names = {}
+    if client_ids:
+        clients = await db.clients.find({"id": {"$in": list(client_ids)}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+        client_names = {c["id"]: c["name"] for c in clients}
+
+    # Pick the soonest occurrence per (day-of-week, start_time, client_id) to show the recurring weekly pattern
+    seen = {}
+    blocks = []
+    for s in sessions:
+        if exclude_client_id and s["client_id"] == exclude_client_id:
+            continue
+        try:
+            sd = datetime.strptime(s["date"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        wd = sd.weekday()
+        key = (wd, s["start_time"], s["client_id"])
+        if key in seen:
+            continue
+        seen[key] = True
+        blocks.append({
+            "day": wd,
+            "day_label": DAYS[wd],
+            "start": s["start_time"],
+            "end": s["end_time"],
+            "client_id": s["client_id"],
+            "client_name": client_names.get(s["client_id"], "Client"),
+            "is_existing": True,
+        })
+    return blocks
+
+
 SKILL_ORDER = {"entry": 1, "intermediate": 2, "experienced": 3}
 
 
@@ -241,6 +285,7 @@ async def smart_match(db, client: dict):
             continue
         coverage_pct = coverage_hours / needed_hours if needed_hours > 0 else 1.0
         score = _compose_score(coverage_pct, c["meta"]["drive_minutes"], c["meta"]["is_existing_relationship"], c["gender_match"])
+        existing_blocks = await _existing_blocks_for_preview(db, c["therapist"]["id"], exclude_client_id=client["id"])
         single_options.append({
             "type": "single",
             "therapists": [{
@@ -273,6 +318,7 @@ async def smart_match(db, client: dict):
             "score": score,
             "tags": _tags(c, coverage_hours >= needed_hours - 0.01),
             "daily_targets": {DAYS[d]: h for d, h in daily_targets.items()} if daily_targets else None,
+            "existing_blocks": existing_blocks,
         })
 
     # Sort: fully covered first, then score
@@ -282,7 +328,7 @@ async def smart_match(db, client: dict):
     multi_options = []
     fully_covered_single = any(o["fully_covered"] for o in single_options)
     if not fully_covered_single and len(candidates) >= 2 and needed_hours > 0:
-        multi_options = _build_multi_options(candidates, needed_hours, daily_targets)
+        multi_options = await _build_multi_options(db, client, candidates, needed_hours, daily_targets)
 
     return {
         "client_id": client["id"],
@@ -363,7 +409,7 @@ def _tags(c, fully_covered):
     return tags
 
 
-def _build_multi_options(candidates, needed_hours, daily_targets=None):
+async def _build_multi_options(db, client, candidates, needed_hours, daily_targets=None):
     """Greedy combination: pick top-coverage candidate, fill gap from next-best, etc.
     If daily_targets is set, allocate per day; otherwise greedy across days."""
     options = []
@@ -487,10 +533,18 @@ def _build_multi_options(candidates, needed_hours, daily_targets=None):
         for tm in team:
             all_blocks.extend(tm["blocks"])
         all_blocks.sort(key=lambda b: (b["day"], b["start"]))
+        # gather existing blocks per team member
+        existing_blocks = []
+        for tm in team:
+            tm_existing = await _existing_blocks_for_preview(db, tm["therapist_id"], exclude_client_id=client["id"])
+            for b in tm_existing:
+                b = {**b, "therapist_id": tm["therapist_id"], "therapist_name": tm["therapist_name"]}
+                existing_blocks.append(b)
         options.append({
             "type": "multi",
             "therapists": [{k: v for k, v in t.items() if k != "blocks"} for t in team],
             "proposed_blocks": all_blocks,
+            "existing_blocks": existing_blocks,
             "coverage_hours": round(coverage_hours, 2),
             "needed_hours": needed_hours,
             "gap_hours": round(max(0.0, needed_hours - coverage_hours), 2),

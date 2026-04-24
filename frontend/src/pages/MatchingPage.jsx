@@ -330,20 +330,31 @@ export default function MatchingPage() {
 
                     {selectedOption ? (
                       <>
-                        {selectedOption.therapists.length > 1 && (
-                          <div className="mb-3 flex flex-wrap gap-3 text-xs">
-                            {selectedOption.therapists.map((t, i) => {
-                              const colors = ["#274f38", "#B07C60", "#7B968B"];
-                              return (
-                                <span key={t.therapist_id} className="inline-flex items-center gap-1.5">
-                                  <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: colors[i % colors.length] }}></span>
-                                  {t.therapist_name}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                        <WeeklyPreview blocks={selectedOption.proposed_blocks} therapists={selectedOption.therapists} />
+                        <div className="mb-3 flex flex-wrap gap-3 text-xs">
+                          {selectedOption.therapists.map((t, i) => {
+                            const colors = ["#274f38", "#B07C60", "#7B968B"];
+                            return (
+                              <span key={t.therapist_id} className="inline-flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: colors[i % colors.length] }}></span>
+                                {t.therapist_name}
+                              </span>
+                            );
+                          })}
+                          {(selectedOption.existing_blocks || []).length > 0 && (
+                            <span className="inline-flex items-center gap-1.5 text-muted-ohana">
+                              <span
+                                className="w-3 h-3 rounded-sm border border-[#A1ACA6]"
+                                style={{ backgroundImage: "repeating-linear-gradient(135deg, #DCE3E0 0 3px, #E5EBE8 3px 6px)" }}
+                              ></span>
+                              Existing booking
+                            </span>
+                          )}
+                        </div>
+                        <WeeklyPreview
+                          blocks={selectedOption.proposed_blocks}
+                          existingBlocks={selectedOption.existing_blocks || []}
+                          therapists={selectedOption.therapists}
+                        />
                       </>
                     ) : (
                       <div className="text-sm text-muted-ohana p-6 text-center">Select an option on the left to preview the weekly schedule.</div>

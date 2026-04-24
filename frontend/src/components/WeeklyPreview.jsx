@@ -1,6 +1,7 @@
 /**
  * Mini weekly preview — visualizes proposed_blocks across a Mon-Sun grid.
- * Each block shows therapist name + time. Multi-therapist options use distinct colors per therapist.
+ * Optional `existingBlocks` are rendered in a muted, striped style behind/alongside proposed blocks
+ * so the admin sees the therapist's full week context.
  */
 import React from "react";
 
@@ -24,15 +25,17 @@ function blockHeight(start, end) {
   return ((eh - sh) + (em - sm) / 60) * HOUR_HEIGHT;
 }
 
-export default function WeeklyPreview({ blocks = [], therapists = [] }) {
+export default function WeeklyPreview({ blocks = [], existingBlocks = [], therapists = [] }) {
   const therapistColor = {};
   therapists.forEach((t, i) => {
     therapistColor[t.therapist_id] = PALETTE[i % PALETTE.length];
   });
 
-  const blocksByDay = {};
-  for (let i = 0; i < 7; i++) blocksByDay[i] = [];
-  blocks.forEach((b) => blocksByDay[b.day].push(b));
+  const proposedByDay = {};
+  const existingByDay = {};
+  for (let i = 0; i < 7; i++) { proposedByDay[i] = []; existingByDay[i] = []; }
+  blocks.forEach((b) => proposedByDay[b.day].push(b));
+  existingBlocks.forEach((b) => existingByDay[b.day].push(b));
 
   const totalHeight = (HOUR_END - HOUR_START) * HOUR_HEIGHT;
 
@@ -54,34 +57,62 @@ export default function WeeklyPreview({ blocks = [], therapists = [] }) {
             </div>
           ))}
         </div>
-        {DAYS.map((_, dayIdx) => (
-          <div key={dayIdx} className="relative border-l border-soft">
-            {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i).map((i) => (
-              <div key={i} style={{ height: HOUR_HEIGHT }} className="border-b border-[#EEEAE0]" />
-            ))}
-            {blocksByDay[dayIdx]?.map((b, i) => {
-              const color = therapistColor[b.therapist_id] || PALETTE[0];
-              return (
+        {DAYS.map((_, dayIdx) => {
+          const proposed = proposedByDay[dayIdx] || [];
+          const existing = existingByDay[dayIdx] || [];
+          // Proposed blocks take the right half, existing the left half if both present on same day
+          return (
+            <div key={dayIdx} className="relative border-l border-soft">
+              {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i).map((i) => (
+                <div key={i} style={{ height: HOUR_HEIGHT }} className="border-b border-[#EEEAE0]" />
+              ))}
+
+              {/* Existing blocks (muted, striped) */}
+              {existing.map((b, i) => (
                 <div
-                  key={i}
-                  data-testid={`preview-block-${dayIdx}-${i}`}
+                  key={`ex-${i}`}
+                  data-testid={`preview-existing-${dayIdx}-${i}`}
+                  title={`Existing: ${b.client_name} · ${b.start}-${b.end}`}
                   style={{
                     top: blockTop(b.start),
                     height: blockHeight(b.start, b.end),
                     left: 2,
-                    right: 2,
-                    backgroundColor: color.bg,
-                    borderLeft: `3px solid ${color.border}`,
+                    width: proposed.length > 0 ? "calc(50% - 3px)" : "calc(100% - 4px)",
+                    backgroundImage: "repeating-linear-gradient(135deg, #DCE3E0 0 6px, #E5EBE8 6px 12px)",
+                    borderLeft: "3px solid #A1ACA6",
                   }}
-                  className="absolute rounded-sm text-white text-[10px] px-1.5 py-1 overflow-hidden shadow-sm"
+                  className="absolute rounded-sm text-[#586960] text-[9px] px-1 py-0.5 overflow-hidden"
                 >
                   <div className="font-mono">{b.start}–{b.end}</div>
-                  <div className="truncate text-white/90 text-[9px]">{b.therapist_name}</div>
+                  <div className="truncate text-[8px] uppercase tracking-wider opacity-80">{b.client_name}</div>
                 </div>
-              );
-            })}
-          </div>
-        ))}
+              ))}
+
+              {/* Proposed blocks */}
+              {proposed.map((b, i) => {
+                const color = therapistColor[b.therapist_id] || PALETTE[0];
+                return (
+                  <div
+                    key={`pr-${i}`}
+                    data-testid={`preview-block-${dayIdx}-${i}`}
+                    style={{
+                      top: blockTop(b.start),
+                      height: blockHeight(b.start, b.end),
+                      left: existing.length > 0 ? "calc(50% + 1px)" : 2,
+                      width: existing.length > 0 ? "calc(50% - 3px)" : "calc(100% - 4px)",
+                      backgroundColor: color.bg,
+                      borderLeft: `3px solid ${color.border}`,
+                    }}
+                    className="absolute rounded-sm text-white text-[10px] px-1.5 py-1 overflow-hidden shadow-sm"
+                  >
+                    <div className="font-mono">{b.start}–{b.end}</div>
+                    <div className="truncate text-white/90 text-[9px]">{b.therapist_name}</div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
