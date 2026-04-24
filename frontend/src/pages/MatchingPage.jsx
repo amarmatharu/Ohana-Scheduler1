@@ -245,6 +245,17 @@ export default function MatchingPage() {
               <div className="inline-flex items-center gap-1.5"><MapPin size={13} /><span className="truncate max-w-md">{client.home_address}</span></div>
             </div>
           )}
+
+          {result?.daily_targets && (
+            <div className="mt-3 flex flex-wrap gap-2 text-xs" data-testid="daily-targets-summary">
+              <span className="text-muted-ohana">Hours per day:</span>
+              {Object.entries(result.daily_targets).map(([day, hrs]) => (
+                <span key={day} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#E5EBE8] text-[#274f38] font-mono">
+                  {day} · {hrs}h
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Step 2: Options */}

@@ -190,7 +190,7 @@ export default function ClientsPage() {
               </div>
             </div>
 
-            <div><Label>Weekly availability</Label><AvailabilityEditor value={form.availability} onChange={(v)=>setForm({...form,availability:v})}/></div>
+            <div><Label>Weekly availability & hours per day</Label><AvailabilityEditor value={form.availability} onChange={(v)=>setForm({...form,availability:v})} showHours={true}/></div>
 
             <div className="border border-soft rounded-md p-4 bg-muted-soft space-y-3">
               <div className="text-sm font-medium flex items-center gap-2"><ShieldCheck size={14}/> Insurance authorization</div>

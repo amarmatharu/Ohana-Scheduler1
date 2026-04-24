@@ -43,10 +43,13 @@ class LoginRequest(BaseModel):
 
 # ---------- Therapist ----------
 class AvailabilityBlock(BaseModel):
-    """Weekly recurring availability. day: 0=Mon..6=Sun. Times are 'HH:MM'."""
+    """Weekly recurring availability. day: 0=Mon..6=Sun. Times are 'HH:MM'.
+    For clients, `hours` represents the target session hours wanted that day
+    (may be less than end-start if the window is wider than needed)."""
     day: int = Field(ge=0, le=6)
     start: str
     end: str
+    hours: Optional[float] = None
 
 
 class TherapistCreate(BaseModel):

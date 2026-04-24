@@ -79,7 +79,26 @@ def _allocate(blocks, hours_needed):
 
 
 def _availability_by_day(av_list):
-    """Convert list of {day,start,end} to dict {day: [(start_min, end_min)]}"""
+    """Convert list of {day,start,end,hours?} to dict {day: {windows:[(s,e)], target_hours: float|None}}.
+    target_hours is the sum of explicit hours per block on that day; None if no block specified hours."""
+    by_day = {i: {"windows": [], "target_hours": None} for i in range(7)}
+    for a in av_list or []:
+        d = int(a.get("day", 0))
+        s, e = _to_min(a["start"]), _to_min(a["end"])
+        by_day[d]["windows"].append((s, e))
+        h = a.get("hours")
+        if h is not None and h != "":
+            try:
+                hf = float(h)
+                if hf > 0:
+                    by_day[d]["target_hours"] = (by_day[d]["target_hours"] or 0) + hf
+            except (TypeError, ValueError):
+                pass
+    return by_day
+
+
+def _windows_only(av_list):
+    """Backward-compat helper: returns simple {day: [(s,e)]} for therapists."""
     by_day = {i: [] for i in range(7)}
     for a in av_list or []:
         d = int(a.get("day", 0))
@@ -146,9 +165,10 @@ def _compose_score(coverage_pct: float, drive_min: Optional[float], is_existing:
 
 
 def _free_blocks_for_therapist(therapist, client, existing_sessions):
-    """Return dict {day: [(start_min, end_min)]} of free blocks where client+therapist availability overlap."""
+    """Return dict {day: {"blocks": [(start_min, end_min)], "target_hours": float|None}}.
+    target_hours is the client's per-day target (may be None if not specified -> falls back to total)."""
     client_av = _availability_by_day(client.get("availability"))
-    therapist_av = _availability_by_day(therapist.get("availability"))
+    therapist_av = _windows_only(therapist.get("availability"))
     booked = _existing_blocks_by_day(existing_sessions)
     free = {}
     for day in range(7):
@@ -156,26 +176,37 @@ def _free_blocks_for_therapist(therapist, client, existing_sessions):
             continue
         if not client.get("weekend_available", False) and day >= 5:
             continue
-        c_av = client_av.get(day, [])
+        c_av = client_av.get(day, {}).get("windows", [])
         t_av = therapist_av.get(day, [])
         if not c_av or not t_av:
             continue
         overlap = _intersect_intervals(c_av, t_av)
         free_day = _subtract_intervals(overlap, booked.get(day, []))
         if free_day:
-            free[day] = _split_to_blocks(free_day)
+            free[day] = {
+                "blocks": _split_to_blocks(free_day),
+                "target_hours": client_av.get(day, {}).get("target_hours"),
+            }
     return free
 
 
 async def smart_match(db, client: dict):
     """Return single-therapist options + multi-therapist options.
 
-    Each option contains:
-      - therapist_id, therapist_name (single) or list of therapists (multi)
-      - proposed_blocks: list of {day, day_label, start, end, hours, therapist_id, therapist_name}
-      - coverage_hours, gap_hours, score, drive_minutes, skill_match, gender_match, is_existing_relationship
+    Per-day targets: if client availability rows specify `hours`, the matcher
+    tries to satisfy that exact daily target. Otherwise it greedily fills
+    `needed_hours_per_week` across all available days.
     """
     needed_hours = float(client.get("needed_hours_per_week") or 0)
+    # compute per-day targets from client availability
+    client_av = _availability_by_day(client.get("availability"))
+    daily_targets = {d: client_av[d]["target_hours"] for d in range(7) if client_av[d]["target_hours"] is not None}
+    # If user provided per-day hours, prefer their sum as the source of truth
+    if daily_targets:
+        explicit_total = sum(daily_targets.values())
+        if explicit_total > 0:
+            needed_hours = explicit_total
+
     therapists = await db.therapists.find({}, {"_id": 0}).to_list(500)
 
     candidates = []
@@ -184,7 +215,7 @@ async def smart_match(db, client: dict):
             continue
         sessions = await db.sessions.find({"therapist_id": t["id"], "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(500)
         free = _free_blocks_for_therapist(t, client, sessions)
-        free_hours = sum((e - s) for day_blocks in free.values() for s, e in day_blocks) / 60.0
+        free_hours = sum((e - s) for d in free.values() for s, e in d["blocks"]) / 60.0
         if free_hours <= 0:
             continue
         meta = await _therapist_score_meta(db, t, client)
@@ -203,13 +234,7 @@ async def smart_match(db, client: dict):
     # ---------- Single therapist options ----------
     single_options = []
     for c in candidates:
-        # Allocate up to needed_hours from this therapist's free blocks
-        all_blocks = []
-        # Sort by day to allocate earliest days first
-        for day in sorted(c["free"].keys()):
-            for s, e in c["free"][day]:
-                all_blocks.append((day, s, e))
-        proposed = _allocate_with_days(all_blocks, needed_hours)
+        proposed = _allocate_single_therapist(c["free"], needed_hours, daily_targets)
         coverage_min = sum(e - s for _, s, e in proposed)
         coverage_hours = coverage_min / 60.0
         if coverage_hours <= 0:
@@ -247,6 +272,7 @@ async def smart_match(db, client: dict):
             "fully_covered": coverage_hours >= needed_hours - 0.01,
             "score": score,
             "tags": _tags(c, coverage_hours >= needed_hours - 0.01),
+            "daily_targets": {DAYS[d]: h for d, h in daily_targets.items()} if daily_targets else None,
         })
 
     # Sort: fully covered first, then score
@@ -256,15 +282,53 @@ async def smart_match(db, client: dict):
     multi_options = []
     fully_covered_single = any(o["fully_covered"] for o in single_options)
     if not fully_covered_single and len(candidates) >= 2 and needed_hours > 0:
-        multi_options = _build_multi_options(candidates, needed_hours)
+        multi_options = _build_multi_options(candidates, needed_hours, daily_targets)
 
     return {
         "client_id": client["id"],
         "client_name": client["name"],
         "needed_hours": needed_hours,
+        "daily_targets": {DAYS[d]: h for d, h in daily_targets.items()} if daily_targets else None,
         "single_options": single_options[:6],
         "multi_options": multi_options[:4],
     }
+
+
+def _allocate_single_therapist(free_by_day, total_needed, daily_targets):
+    """If daily_targets is non-empty, allocate per day target. Otherwise greedy across days."""
+    chosen = []  # (day, start, end)
+    if daily_targets:
+        for day, target in daily_targets.items():
+            blocks = (free_by_day.get(day) or {}).get("blocks", [])
+            if not blocks:
+                continue
+            day_chosen = _allocate_within_day(blocks, target)
+            chosen.extend([(day, s, e) for s, e in day_chosen])
+    else:
+        # greedy across all days
+        all_blocks = []
+        for d, info in free_by_day.items():
+            for s, e in info["blocks"]:
+                all_blocks.append((d, s, e))
+        chosen = _allocate_with_days(all_blocks, total_needed)
+    chosen.sort(key=lambda b: (b[0], b[1]))
+    return chosen
+
+
+def _allocate_within_day(blocks, target_hours):
+    """Allocate ~target_hours within a single day's free blocks (longest first, may split into 2)."""
+    target_min = int(target_hours * 60)
+    sorted_blocks = sorted(blocks, key=lambda b: -(b[1] - b[0]))
+    chosen = []
+    total = 0
+    for s, e in sorted_blocks:
+        if total >= target_min:
+            break
+        chunk = min(e - s, target_min - total)
+        chosen.append((s, s + chunk))
+        total += chunk
+    chosen.sort()
+    return chosen
 
 
 def _allocate_with_days(blocks_with_day, hours_needed):
@@ -299,68 +363,122 @@ def _tags(c, fully_covered):
     return tags
 
 
-def _build_multi_options(candidates, needed_hours):
-    """Greedy combination: pick top-coverage candidate, fill gap from next-best, etc."""
+def _build_multi_options(candidates, needed_hours, daily_targets=None):
+    """Greedy combination: pick top-coverage candidate, fill gap from next-best, etc.
+    If daily_targets is set, allocate per day; otherwise greedy across days."""
     options = []
-    # Sort candidates by free_hours desc + proximity
     ranked = sorted(
         candidates,
         key=lambda c: (-(c["free_hours"]), c["meta"]["drive_minutes"] or 999),
     )
-    # Try a few seed combinations
     for seed_idx in range(min(3, len(ranked))):
-        used_days = {}  # day -> list of (start, end)
+        used_days = {}  # day -> [(s, e)]
         team = []
-        target_min = int(needed_hours * 60)
-        total_min = 0
-        # Try adding therapists one by one
         order = [seed_idx] + [i for i in range(len(ranked)) if i != seed_idx]
-        for i in order:
-            if total_min >= target_min:
-                break
-            cand = ranked[i]
-            # collect cand's blocks excluding days already saturated
-            cand_blocks = []
-            for day, blocks in cand["free"].items():
-                used = used_days.get(day, [])
-                free_today = _subtract_intervals(blocks, used)
-                for s, e in free_today:
-                    cand_blocks.append((day, s, e))
-            chosen = _allocate_with_days(cand_blocks, (target_min - total_min) / 60.0)
-            if not chosen:
-                continue
-            blocks_assigned = [
-                {
+
+        if daily_targets:
+            # Per-day mode: for each day, allocate that day's target across therapists
+            day_remaining = dict(daily_targets)
+            therapist_blocks = {i: [] for i in order}
+            for i in order:
+                if not any(v > 0.01 for v in day_remaining.values()):
+                    break
+                cand = ranked[i]
+                for day, target in list(day_remaining.items()):
+                    if target <= 0.01:
+                        continue
+                    free_today_blocks = (cand["free"].get(day) or {}).get("blocks", [])
+                    used = used_days.get(day, [])
+                    avail = _subtract_intervals(free_today_blocks, used)
+                    if not avail:
+                        continue
+                    chunks = _allocate_within_day(avail, target)
+                    if not chunks:
+                        continue
+                    covered = sum(e - s for s, e in chunks) / 60.0
+                    therapist_blocks[i].extend([(day, s, e) for s, e in chunks])
+                    used_days.setdefault(day, []).extend(chunks)
+                    day_remaining[day] = max(0.0, target - covered)
+            # build team objects
+            for i in order:
+                if not therapist_blocks[i]:
+                    continue
+                cand = ranked[i]
+                blocks = therapist_blocks[i]
+                blocks_assigned = [
+                    {
+                        "therapist_id": cand["therapist"]["id"],
+                        "therapist_name": cand["therapist"]["name"],
+                        "day": d,
+                        "day_label": DAYS[d],
+                        "start": _to_hhmm(s),
+                        "end": _to_hhmm(e),
+                        "hours": round((e - s) / 60.0, 2),
+                    }
+                    for d, s, e in blocks
+                ]
+                covered_min = sum(e - s for _, s, e in blocks)
+                team.append({
                     "therapist_id": cand["therapist"]["id"],
                     "therapist_name": cand["therapist"]["name"],
-                    "day": d,
-                    "day_label": DAYS[d],
-                    "start": _to_hhmm(s),
-                    "end": _to_hhmm(e),
-                    "hours": round((e - s) / 60.0, 2),
-                }
-                for d, s, e in chosen
-            ]
-            covered_min = sum(e - s for _, s, e in chosen)
-            total_min += covered_min
-            for d, s, e in chosen:
-                used_days.setdefault(d, []).append((s, e))
-            team.append({
-                "therapist_id": cand["therapist"]["id"],
-                "therapist_name": cand["therapist"]["name"],
-                "skill_level": cand["therapist"].get("skill_level"),
-                "gender": cand["therapist"].get("gender"),
-                "drive_minutes": cand["meta"]["drive_minutes"],
-                "distance_km": cand["meta"]["distance_km"],
-                "is_existing_relationship": cand["meta"]["is_existing_relationship"],
-                "covered_hours": round(covered_min / 60.0, 2),
-                "blocks": blocks_assigned,
-            })
+                    "skill_level": cand["therapist"].get("skill_level"),
+                    "gender": cand["therapist"].get("gender"),
+                    "drive_minutes": cand["meta"]["drive_minutes"],
+                    "distance_km": cand["meta"]["distance_km"],
+                    "is_existing_relationship": cand["meta"]["is_existing_relationship"],
+                    "covered_hours": round(covered_min / 60.0, 2),
+                    "blocks": blocks_assigned,
+                })
+            total_min = sum(sum(e - s for _, s, e in therapist_blocks[i]) for i in order)
+        else:
+            # Greedy mode (no per-day targets)
+            target_min = int(needed_hours * 60)
+            total_min = 0
+            for i in order:
+                if total_min >= target_min:
+                    break
+                cand = ranked[i]
+                cand_blocks = []
+                for day, info in cand["free"].items():
+                    used = used_days.get(day, [])
+                    free_today = _subtract_intervals(info["blocks"], used)
+                    for s, e in free_today:
+                        cand_blocks.append((day, s, e))
+                chosen = _allocate_with_days(cand_blocks, (target_min - total_min) / 60.0)
+                if not chosen:
+                    continue
+                blocks_assigned = [
+                    {
+                        "therapist_id": cand["therapist"]["id"],
+                        "therapist_name": cand["therapist"]["name"],
+                        "day": d,
+                        "day_label": DAYS[d],
+                        "start": _to_hhmm(s),
+                        "end": _to_hhmm(e),
+                        "hours": round((e - s) / 60.0, 2),
+                    }
+                    for d, s, e in chosen
+                ]
+                covered_min = sum(e - s for _, s, e in chosen)
+                total_min += covered_min
+                for d, s, e in chosen:
+                    used_days.setdefault(d, []).append((s, e))
+                team.append({
+                    "therapist_id": cand["therapist"]["id"],
+                    "therapist_name": cand["therapist"]["name"],
+                    "skill_level": cand["therapist"].get("skill_level"),
+                    "gender": cand["therapist"].get("gender"),
+                    "drive_minutes": cand["meta"]["drive_minutes"],
+                    "distance_km": cand["meta"]["distance_km"],
+                    "is_existing_relationship": cand["meta"]["is_existing_relationship"],
+                    "covered_hours": round(covered_min / 60.0, 2),
+                    "blocks": blocks_assigned,
+                })
+
         if not team or len(team) < 2:
             continue
         coverage_hours = total_min / 60.0
-        coverage_pct = coverage_hours / needed_hours
-        # Combined score: coverage + best therapist's proximity
+        coverage_pct = coverage_hours / needed_hours if needed_hours > 0 else 0
         avg_drive = sum((t["drive_minutes"] or 30) for t in team) / len(team)
         prox = max(0.0, 1.0 - max(0, avg_drive - 5) / 55.0)
         any_existing = any(t["is_existing_relationship"] for t in team)
@@ -382,7 +500,6 @@ def _build_multi_options(candidates, needed_hours):
                     + (["Existing relationship"] if any_existing else [])
                     + [f"{len(team)} therapists"]),
         })
-    # de-dup by therapist set
     seen = set()
     unique = []
     for o in options:
