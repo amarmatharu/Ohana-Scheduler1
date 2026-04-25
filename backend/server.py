@@ -361,6 +361,45 @@ async def list_users(admin: dict = Depends(require_role("admin"))):
     return docs
 
 
+@api.post("/users", response_model=UserPublic)
+async def admin_create_user(body: dict, admin: dict = Depends(require_role("admin"))):
+    """Admin creates a login account with optional immediate profile link."""
+    from auth import hash_password as _hash
+    import uuid as _u
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    name = (body.get("name") or "").strip()
+    role = body.get("role") or "client"
+    profile_id = body.get("linked_profile_id")
+    if not email or not password or not name:
+        raise HTTPException(status_code=400, detail="email, password, and name are required")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if role not in ("admin", "therapist", "client"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    if profile_id:
+        coll = db.therapists if role == "therapist" else db.clients if role == "client" else None
+        if coll is None:
+            raise HTTPException(status_code=400, detail="Cannot link admin to a profile")
+        prof = await coll.find_one({"id": profile_id}, {"_id": 0})
+        if not prof:
+            raise HTTPException(status_code=404, detail=f"{role} profile not found")
+    user_id = str(_u.uuid4())
+    await db.users.insert_one({
+        "id": user_id,
+        "email": email,
+        "name": name,
+        "role": role,
+        "password_hash": _hash(password),
+        "linked_profile_id": profile_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return UserPublic(id=user_id, email=email, name=name, role=role, linked_profile_id=profile_id)
+
+
 # ================= Dashboard =================
 @api.get("/dashboard/stats")
 async def dashboard_stats(admin: dict = Depends(require_role("admin"))):

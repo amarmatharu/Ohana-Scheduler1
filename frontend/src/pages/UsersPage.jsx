@@ -3,8 +3,10 @@ import { api, formatApiError } from "../lib/api";
 import PageHeader from "../components/PageHeader";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
-import { Link2, Link2Off, Users as UsersIcon, Search } from "lucide-react";
+import { Link2, Link2Off, Users as UsersIcon, Search, UserPlus, Trash2 } from "lucide-react";
 
 const ROLE_BADGE = {
   admin: "bg-[#274f38] text-white",
@@ -19,6 +21,9 @@ export default function UsersPage() {
   const [filter, setFilter] = useState("");
   const [drafts, setDrafts] = useState({}); // user_id -> selected profile_id
   const [savingId, setSavingId] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({ email: "", password: "", name: "", role: "therapist", linked_profile_id: "" });
+  const [creating, setCreating] = useState(false);
 
   const load = async () => {
     try {
@@ -73,11 +78,45 @@ export default function UsersPage() {
     }
   };
 
+  const openCreate = () => {
+    setCreateForm({ email: "", password: "", name: "", role: "therapist", linked_profile_id: "" });
+    setCreateOpen(true);
+  };
+
+  const submitCreate = async (e) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      const payload = {
+        email: createForm.email,
+        password: createForm.password,
+        name: createForm.name,
+        role: createForm.role,
+        linked_profile_id: createForm.linked_profile_id || null,
+      };
+      await api.post("/users", payload);
+      toast.success(`Account created for ${createForm.email}`);
+      setCreateOpen(false);
+      await load();
+    } catch (err) {
+      toast.error(formatApiError(err.response?.data?.detail) || err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const availableProfiles = createForm.role === "therapist" ? therapists : createForm.role === "client" ? clients : [];
+
   return (
     <div>
       <PageHeader
         title="Users & profile links"
         subtitle="Connect login accounts to therapist or client records so they can sign in and see their schedule."
+        action={
+          <Button data-testid="new-user-btn" onClick={openCreate} className="bg-primary-ohana hover:bg-[#1E3D2B] text-white">
+            <UserPlus size={16} className="mr-1.5" /> Create user account
+          </Button>
+        }
       />
       <div className="px-10 pb-10 space-y-4">
         <div className="bg-surface border border-soft rounded-lg p-4 card-shadow flex items-center gap-3">
@@ -189,6 +228,91 @@ export default function UsersPage() {
           Until you link them, their portal will show an empty schedule with an onboarding notice.
         </p>
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-md bg-white" data-testid="create-user-dialog">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "Outfit" }}>Create user account</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={submitCreate} className="space-y-4 pt-2">
+            <div>
+              <Label>Full name</Label>
+              <Input
+                data-testid="create-user-name"
+                required
+                value={createForm.name}
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>Email</Label>
+              <Input
+                data-testid="create-user-email"
+                type="email"
+                required
+                value={createForm.email}
+                onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>Temporary password</Label>
+              <Input
+                data-testid="create-user-password"
+                type="text"
+                required
+                minLength={8}
+                value={createForm.password}
+                onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                placeholder="At least 8 characters"
+              />
+              <p className="text-xs text-muted-ohana mt-1">Share this securely with the user. They can change it after signing in.</p>
+            </div>
+            <div>
+              <Label>Role</Label>
+              <select
+                data-testid="create-user-role"
+                value={createForm.role}
+                onChange={(e) => setCreateForm({ ...createForm, role: e.target.value, linked_profile_id: "" })}
+                className="w-full h-10 px-3 rounded-md border border-soft bg-white text-sm"
+              >
+                <option value="therapist">Therapist</option>
+                <option value="client">Client</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            {createForm.role !== "admin" && (
+              <div>
+                <Label>Link to {createForm.role} profile (optional)</Label>
+                <select
+                  data-testid="create-user-profile"
+                  value={createForm.linked_profile_id}
+                  onChange={(e) => setCreateForm({ ...createForm, linked_profile_id: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md border border-soft bg-white text-sm"
+                >
+                  <option value="">— skip for now —</option>
+                  {availableProfiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <p className="text-xs text-muted-ohana mt-1">
+                  {availableProfiles.length === 0
+                    ? `No ${createForm.role} profiles yet — create one in ${createForm.role === "therapist" ? "Therapists" : "Clients"} first.`
+                    : "Auto-links the new account to the selected profile so the portal works immediately."}
+                </p>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+              <Button
+                type="submit"
+                data-testid="submit-create-user"
+                disabled={creating}
+                className="bg-primary-ohana hover:bg-[#1E3D2B] text-white"
+              >
+                {creating ? "Creating…" : "Create account"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
