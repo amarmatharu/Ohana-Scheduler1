@@ -8,7 +8,7 @@ import { Input } from "../components/ui/input";
 import { toast } from "sonner";
 import {
   GitMerge, MapPin, Heart, CheckCircle2, AlertTriangle, Sparkles,
-  UserPlus, Clock, Award, Car, CalendarCheck, Users, X, Filter
+  UserPlus, Clock, Award, Car, CalendarCheck, Users, X, Filter, Plus, Trash2
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 
@@ -136,8 +136,9 @@ export default function MatchingPage() {
   const [weekStart, setWeekStart] = useState(nextMonday());
   const [confirming, setConfirming] = useState(false);
   const [therapistFilter, setTherapistFilter] = useState("all"); // "all" | therapist_id
-  const [blockDetail, setBlockDetail] = useState(null); // {block, kind, clientDetails?}
+  const [blockDetail, setBlockDetail] = useState(null); // {block, kind, blockIndex?, clientDetails?}
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [editedBlocks, setEditedBlocks] = useState(null); // null = use original; array = user-modified
 
   useEffect(() => {
     (async () => {
@@ -190,7 +191,7 @@ export default function MatchingPage() {
       const { data } = await api.post("/match/confirm", {
         client_id: result.client_id,
         week_start_date: weekStart,
-        proposed_blocks: selectedOption.proposed_blocks,
+        proposed_blocks: activeBlocks,
       });
       const skipped = data.skipped?.length || 0;
       toast.success(`Scheduled ${data.created} session${data.created !== 1 ? "s" : ""}${skipped ? ` (${skipped} skipped due to conflicts)` : ""}`);
@@ -202,16 +203,31 @@ export default function MatchingPage() {
     }
   };
 
-  // Reset filter whenever a new option is selected
+  // Reset filter & edits whenever a new option is selected
   useEffect(() => {
     setTherapistFilter("all");
+    setEditedBlocks(null);
   }, [selectedOptionKey]);
+
+  // Resolve the active blocks (user edits override the original proposal)
+  const activeBlocks = useMemo(() => {
+    if (!selectedOption) return [];
+    return editedBlocks ?? selectedOption.proposed_blocks;
+  }, [selectedOption, editedBlocks]);
+
+  const editedHours = useMemo(() => {
+    return activeBlocks.reduce((sum, b) => {
+      const [sh, sm] = b.start.split(":").map(Number);
+      const [eh, em] = b.end.split(":").map(Number);
+      return sum + Math.max(0, ((eh * 60 + em) - (sh * 60 + sm)) / 60);
+    }, 0);
+  }, [activeBlocks]);
 
   const filteredProposed = useMemo(() => {
     if (!selectedOption) return [];
-    if (therapistFilter === "all") return selectedOption.proposed_blocks;
-    return selectedOption.proposed_blocks.filter(b => b.therapist_id === therapistFilter);
-  }, [selectedOption, therapistFilter]);
+    if (therapistFilter === "all") return activeBlocks;
+    return activeBlocks.filter(b => b.therapist_id === therapistFilter);
+  }, [selectedOption, therapistFilter, activeBlocks]);
 
   const filteredExisting = useMemo(() => {
     if (!selectedOption) return [];
@@ -220,7 +236,22 @@ export default function MatchingPage() {
     return all.filter(b => b.therapist_id === therapistFilter);
   }, [selectedOption, therapistFilter]);
 
+  // Find the index of a block within activeBlocks (so we can identify it for editing)
+  const findBlockIndex = (block) => {
+    return activeBlocks.findIndex(b =>
+      b.therapist_id === block.therapist_id &&
+      b.day === block.day &&
+      b.start === block.start &&
+      b.end === block.end
+    );
+  };
+
   const handleBlockClick = async (block, kind) => {
+    if (kind === "proposed") {
+      const idx = findBlockIndex(block);
+      setBlockDetail({ block: { ...block }, kind, blockIndex: idx });
+      return;
+    }
     setBlockDetail({ block, kind, clientDetails: null });
     if (kind === "existing" && block.client_id) {
       setLoadingDetail(true);
@@ -228,11 +259,45 @@ export default function MatchingPage() {
         const { data } = await api.get(`/clients/${block.client_id}`);
         setBlockDetail({ block, kind, clientDetails: data });
       } catch {
-        // ignore — show what we have
+        // ignore
       } finally {
         setLoadingDetail(false);
       }
     }
+  };
+
+  const updateProposedBlock = (index, patch) => {
+    const next = activeBlocks.slice();
+    next[index] = { ...next[index], ...patch };
+    setEditedBlocks(next);
+  };
+
+  const deleteProposedBlock = (index) => {
+    const next = activeBlocks.filter((_, i) => i !== index);
+    setEditedBlocks(next);
+    setBlockDetail(null);
+    toast.success("Block removed");
+  };
+
+  const addProposedBlock = () => {
+    if (!selectedOption) return;
+    const therapist = selectedOption.therapists[0];
+    const newBlock = {
+      therapist_id: therapist.therapist_id,
+      therapist_name: therapist.therapist_name,
+      day: 0,
+      day_label: "Mon",
+      start: "15:00",
+      end: "17:00",
+      hours: 2,
+    };
+    setEditedBlocks([...activeBlocks, newBlock]);
+    setBlockDetail({ block: newBlock, kind: "proposed", blockIndex: activeBlocks.length });
+  };
+
+  const resetEdits = () => {
+    setEditedBlocks(null);
+    toast.success("Reset to original proposal");
   };
 
   return (
@@ -349,17 +414,41 @@ export default function MatchingPage() {
                 {/* Right: weekly preview */}
                 <div className="space-y-4 lg:sticky lg:top-6 self-start">
                   <div className="bg-surface border border-soft rounded-lg p-5 card-shadow">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                       <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold">Step 2 · Preview</div>
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold flex items-center gap-2">
+                          Step 2 · Preview
+                          {editedBlocks && (
+                            <span data-testid="modified-badge" className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#FDF4E7] text-[#B07C60] normal-case tracking-normal">Modified</span>
+                          )}
+                        </div>
                         <h3 className="text-lg font-medium mt-0.5" style={{ fontFamily: "Outfit" }}>
                           Proposed weekly schedule
                         </h3>
                       </div>
                       {selectedOption && (
-                        <div className="text-right">
-                          <div className="text-xs text-muted-ohana">{selectedOption.proposed_blocks.length} blocks</div>
-                          <div className="font-mono text-sm">{selectedOption.coverage_hours} hr / wk</div>
+                        <div className="flex items-center gap-3">
+                          {editedBlocks && (
+                            <button
+                              data-testid="reset-edits-btn"
+                              onClick={resetEdits}
+                              className="text-xs text-[#586960] hover:text-[#274f38] underline-offset-2 hover:underline"
+                            >
+                              Reset to original
+                            </button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            data-testid="add-block-btn"
+                            onClick={addProposedBlock}
+                          >
+                            <Plus size={13} className="mr-1" /> Add block
+                          </Button>
+                          <div className="text-right">
+                            <div className="text-xs text-muted-ohana">{activeBlocks.length} blocks</div>
+                            <div className="font-mono text-sm">{editedHours.toFixed(1)} hr / wk</div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -451,7 +540,7 @@ export default function MatchingPage() {
                           className="bg-primary-ohana hover:bg-[#1E3D2B] text-white"
                         >
                           <CalendarCheck size={16} className="mr-2" />
-                          {confirming ? "Scheduling…" : `Confirm & schedule ${selectedOption.proposed_blocks.length} blocks`}
+                          {confirming ? "Scheduling…" : `Confirm & schedule ${activeBlocks.length} block${activeBlocks.length !== 1 ? "s" : ""}`}
                         </Button>
                       </div>
                       <p className="text-xs text-muted-ohana mt-2">
@@ -486,16 +575,18 @@ export default function MatchingPage() {
           </DialogHeader>
           {blockDetail && (
             <div className="space-y-4 text-sm pt-2">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Day</div>
-                  <div className="font-medium mt-1">{blockDetail.block.day_label}</div>
+              {blockDetail.kind === "existing" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Day</div>
+                    <div className="font-medium mt-1">{blockDetail.block.day_label}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Time</div>
+                    <div className="font-mono mt-1">{blockDetail.block.start} – {blockDetail.block.end}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Time</div>
-                  <div className="font-mono mt-1">{blockDetail.block.start} – {blockDetail.block.end}</div>
-                </div>
-              </div>
+              )}
 
               {blockDetail.kind === "existing" ? (
                 <>
@@ -529,12 +620,102 @@ export default function MatchingPage() {
                   </div>
                 </>
               ) : (
-                <div className="border-t border-soft pt-4">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Therapist</div>
-                  <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>{blockDetail.block.therapist_name}</div>
-                  <div className="font-mono text-xs text-muted-ohana mt-1">
-                    {blockDetail.block.hours} hr block
+                <div className="border-t border-soft pt-4 space-y-4">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Therapist</div>
+                    {selectedOption && selectedOption.therapists.length > 1 ? (
+                      <select
+                        data-testid="edit-block-therapist"
+                        value={blockDetail.block.therapist_id}
+                        onChange={(e) => {
+                          const t = selectedOption.therapists.find(x => x.therapist_id === e.target.value);
+                          const next = { ...blockDetail.block, therapist_id: t.therapist_id, therapist_name: t.therapist_name };
+                          setBlockDetail({ ...blockDetail, block: next });
+                          if (blockDetail.blockIndex >= 0) {
+                            updateProposedBlock(blockDetail.blockIndex, { therapist_id: t.therapist_id, therapist_name: t.therapist_name });
+                          }
+                        }}
+                        className="w-full h-10 px-3 rounded-md border border-soft bg-white text-sm"
+                      >
+                        {selectedOption.therapists.map(t => (
+                          <option key={t.therapist_id} value={t.therapist_id}>{t.therapist_name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>{blockDetail.block.therapist_name}</div>
+                    )}
                   </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-1">Day</div>
+                      <select
+                        data-testid="edit-block-day"
+                        value={blockDetail.block.day}
+                        onChange={(e) => {
+                          const day = parseInt(e.target.value);
+                          const dayLabels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+                          const next = { ...blockDetail.block, day, day_label: dayLabels[day] };
+                          setBlockDetail({ ...blockDetail, block: next });
+                          if (blockDetail.blockIndex >= 0) {
+                            updateProposedBlock(blockDetail.blockIndex, { day, day_label: dayLabels[day] });
+                          }
+                        }}
+                        className="w-full h-10 px-3 rounded-md border border-soft bg-white text-sm"
+                      >
+                        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d, i) => <option key={i} value={i}>{d}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-1">Start</div>
+                      <Input
+                        type="time"
+                        data-testid="edit-block-start"
+                        value={blockDetail.block.start}
+                        onChange={(e) => {
+                          const start = e.target.value;
+                          const next = { ...blockDetail.block, start };
+                          setBlockDetail({ ...blockDetail, block: next });
+                          if (blockDetail.blockIndex >= 0) updateProposedBlock(blockDetail.blockIndex, { start });
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-1">End</div>
+                      <Input
+                        type="time"
+                        data-testid="edit-block-end"
+                        value={blockDetail.block.end}
+                        onChange={(e) => {
+                          const end = e.target.value;
+                          const next = { ...blockDetail.block, end };
+                          setBlockDetail({ ...blockDetail, block: next });
+                          if (blockDetail.blockIndex >= 0) updateProposedBlock(blockDetail.blockIndex, { end });
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      data-testid="delete-block-btn"
+                      onClick={() => deleteProposedBlock(blockDetail.blockIndex)}
+                      className="text-[#B85C5C] border-[#F4D6D6] hover:bg-[#FCEBEB]"
+                    >
+                      <Trash2 size={14} className="mr-1.5" /> Remove block
+                    </Button>
+                    <Button
+                      type="button"
+                      data-testid="close-block-btn"
+                      onClick={() => setBlockDetail(null)}
+                      className="bg-primary-ohana hover:bg-[#1E3D2B] text-white"
+                    >
+                      Done
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-ohana">
+                    Edits are local. Conflicts are checked on the server when you click "Confirm & schedule" — any block that conflicts with an existing booking is skipped (you'll see the count in the toast).
+                  </p>
                 </div>
               )}
             </div>
