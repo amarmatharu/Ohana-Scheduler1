@@ -337,11 +337,22 @@ async def delete_session(session_id: str, user: dict = Depends(require_role("adm
 
 # ================= Link user to profile =================
 @api.post("/users/{user_id}/link-profile")
-async def link_profile(user_id: str, profile_id: str, profile_type: str, admin: dict = Depends(require_role("admin"))):
-    if profile_type not in ("therapist", "client"):
-        raise HTTPException(status_code=400, detail="profile_type must be therapist or client")
+async def link_profile(user_id: str, body: dict, admin: dict = Depends(require_role("admin"))):
+    profile_id = body.get("profile_id")
+    profile_type = body.get("profile_type")
+    if profile_type not in ("therapist", "client", None):
+        raise HTTPException(status_code=400, detail="profile_type must be therapist, client, or null")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if profile_id:
+        coll = db.therapists if profile_type == "therapist" else db.clients
+        prof = await coll.find_one({"id": profile_id}, {"_id": 0})
+        if not prof:
+            raise HTTPException(status_code=404, detail=f"{profile_type} profile not found")
+        # Sanity: role should match profile_type (warn but don't reject; admin role can link to either)
     await db.users.update_one({"id": user_id}, {"$set": {"linked_profile_id": profile_id}})
-    return {"ok": True}
+    return {"ok": True, "user_id": user_id, "linked_profile_id": profile_id}
 
 
 @api.get("/users", response_model=List[UserPublic])

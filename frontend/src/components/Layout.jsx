@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
   LayoutDashboard, Users, UserCog, GitMerge, CalendarClock,
-  ShieldCheck, LogOut, CalendarDays, Stethoscope, Map as MapIcon
+  ShieldCheck, LogOut, CalendarDays, Stethoscope, Map as MapIcon, KeyRound
 } from "lucide-react";
 
 const navByRole = {
@@ -15,6 +15,7 @@ const navByRole = {
     { to: "/admin/schedule", label: "Schedule", icon: CalendarClock },
     { to: "/admin/map", label: "Map", icon: MapIcon },
     { to: "/admin/insurance", label: "Insurance", icon: ShieldCheck },
+    { to: "/admin/users", label: "Users", icon: KeyRound },
   ],
   therapist: [
     { to: "/therapist", label: "My Schedule", icon: CalendarDays, end: true },

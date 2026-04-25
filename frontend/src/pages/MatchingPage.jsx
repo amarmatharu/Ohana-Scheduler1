@@ -300,6 +300,33 @@ export default function MatchingPage() {
     toast.success("Reset to original proposal");
   };
 
+  // Live conflict count: any active block overlapping an existing block (same therapist+day) or another active block (same therapist+day)
+  const conflictCount = useMemo(() => {
+    if (!selectedOption) return 0;
+    const toMin = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+    const overlaps = (s1, e1, s2, e2) => s1 < e2 && s2 < e1;
+    let count = 0;
+    activeBlocks.forEach((b, i) => {
+      const bs = toMin(b.start), be = toMin(b.end);
+      let conflicted = false;
+      for (const ex of (selectedOption.existing_blocks || [])) {
+        if (ex.day !== b.day) continue;
+        if (ex.therapist_id && b.therapist_id && ex.therapist_id !== b.therapist_id) continue;
+        if (overlaps(bs, be, toMin(ex.start), toMin(ex.end))) { conflicted = true; break; }
+      }
+      if (!conflicted) {
+        for (let j = 0; j < activeBlocks.length; j++) {
+          if (j === i) continue;
+          const o = activeBlocks[j];
+          if (o.day !== b.day || o.therapist_id !== b.therapist_id) continue;
+          if (overlaps(bs, be, toMin(o.start), toMin(o.end))) { conflicted = true; break; }
+        }
+      }
+      if (conflicted) count++;
+    });
+    return count;
+  }, [selectedOption, activeBlocks]);
+
   return (
     <div>
       <PageHeader
@@ -452,6 +479,15 @@ export default function MatchingPage() {
                         </div>
                       )}
                     </div>
+                    {conflictCount > 0 && (
+                      <div data-testid="conflict-banner" className="mb-3 flex items-center gap-2 text-xs px-3 py-2 rounded-md bg-[#FCEBEB] border border-[#F4D6D6] text-[#B85C5C]">
+                        <AlertTriangle size={13} />
+                        <span>
+                          {conflictCount} block{conflictCount > 1 ? "s" : ""} overlap{conflictCount === 1 ? "s" : ""} an existing booking or another proposed block. Drag, edit, or remove to resolve before confirming.
+                        </span>
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-ohana mb-2">Drag a block vertically to change time, horizontally to change day. Click to edit details.</p>
 
                     {selectedOption ? (
                       <>
@@ -512,6 +548,14 @@ export default function MatchingPage() {
                           existingBlocks={filteredExisting}
                           therapists={selectedOption.therapists}
                           onBlockClick={handleBlockClick}
+                          onBlockMove={(idx, patch) => {
+                            // idx is the index in filteredProposed; map back to activeBlocks
+                            const block = filteredProposed[idx];
+                            const realIdx = activeBlocks.indexOf(block);
+                            const targetIdx = realIdx >= 0 ? realIdx : idx;
+                            const dayLabels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+                            updateProposedBlock(targetIdx, { ...patch, day_label: dayLabels[patch.day] });
+                          }}
                         />
                       </>
                     ) : (
