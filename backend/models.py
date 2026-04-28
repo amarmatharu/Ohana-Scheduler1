@@ -100,6 +100,11 @@ class ClientCreate(BaseModel):
     other_services: List[str] = Field(default_factory=list)  # ["speech","occupational"]
     insurance: InsuranceInfo = Field(default_factory=InsuranceInfo)
     needed_hours_per_week: float = 10.0
+    # Per-discipline weekly hour targets. Defaults match Ohana's clinical model:
+    # BT 10h, PM 2h overlapping BT, BCBA ~3h/month (~0.75h/wk) overlapping BT.
+    team_hours: dict = Field(
+        default_factory=lambda: {"bt": 10.0, "program_manager": 2.0, "bcba": 0.75}
+    )
     notes: Optional[str] = None
 
 
@@ -108,6 +113,8 @@ class Client(ClientCreate):
     lat: Optional[float] = None
     lng: Optional[float] = None
     assigned_therapist_ids: List[str] = Field(default_factory=list)
+    # Currently-assigned team members keyed by discipline
+    assigned_team: dict = Field(default_factory=dict)  # {"bt": id, "program_manager": id, "bcba": id}
     scheduled_hours_per_week: float = 0.0
     created_at: str = Field(default_factory=_now)
 
@@ -134,6 +141,10 @@ class SessionBlock(SessionBlockCreate):
     rest_break_required: bool = False
     lunch_break_required: bool = False
     travel_minutes_before: int = 0
+    # Recurring series support: blocks with the same series_id repeat weekly
+    series_id: Optional[str] = None
+    recurring_weekly: bool = True
+    discipline: Optional[str] = None  # snapshot of therapist.therapist_role at creation
     created_at: str = Field(default_factory=_now)
 
 

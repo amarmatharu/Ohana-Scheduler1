@@ -74,14 +74,48 @@ export default function WeeklyPreview({
   const proposedByDay = useMemo(() => {
     const m = {}; for (let i = 0; i < 7; i++) m[i] = [];
     blocks.forEach((b, i) => m[b.day].push({ ...b, _idx: i }));
+    Object.keys(m).forEach(k => m[k].sort((a, b) => a.start.localeCompare(b.start)));
     return m;
   }, [blocks]);
 
   const existingByDay = useMemo(() => {
     const m = {}; for (let i = 0; i < 7; i++) m[i] = [];
     existingBlocks.forEach(b => m[b.day].push(b));
+    Object.keys(m).forEach(k => m[k].sort((a, b) => a.start.localeCompare(b.start)));
     return m;
   }, [existingBlocks]);
+
+  // Compute travel windows (real drive minutes from a prior session ending to this session starting)
+  // for the SAME therapist on the same day. Renders as a thin striped block before each session.
+  const travelWindows = useMemo(() => {
+    const out = []; // {day, start_min, end_min, therapist_id, label}
+    for (let day = 0; day < 7; day++) {
+      const allDay = [
+        ...(existingByDay[day] || []).map(b => ({ ...b, _kind: "existing" })),
+        ...(proposedByDay[day] || []).map(b => ({ ...b, _kind: "proposed" })),
+      ].sort((a, b) => a.start.localeCompare(b.start));
+      for (let i = 1; i < allDay.length; i++) {
+        const prev = allDay[i - 1], cur = allDay[i];
+        if (prev.therapist_id !== cur.therapist_id) continue;
+        const drive = cur.travel_minutes_before;
+        if (!drive || drive < 5) continue;
+        const [eh, em] = prev.end.split(":").map(Number);
+        const prevEnd = eh * 60 + em;
+        const [sh, sm] = cur.start.split(":").map(Number);
+        const curStart = sh * 60 + sm;
+        const start = Math.max(prevEnd, curStart - drive);
+        if (curStart - start < 5) continue;
+        out.push({
+          day,
+          start_min: start,
+          end_min: curStart,
+          therapist_id: cur.therapist_id,
+          label: `${drive} min drive`,
+        });
+      }
+    }
+    return out;
+  }, [proposedByDay, existingByDay]);
 
   const totalHeight = (HOUR_END - HOUR_START) * HOUR_HEIGHT;
 
@@ -166,10 +200,33 @@ export default function WeeklyPreview({
         {DAYS.map((_, dayIdx) => {
           const proposed = proposedByDay[dayIdx] || [];
           const existing = existingByDay[dayIdx] || [];
+          const travels = travelWindows.filter(w => w.day === dayIdx);
           return (
             <div key={dayIdx} className="relative border-l border-soft">
               {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => i).map((i) => (
                 <div key={i} style={{ height: HOUR_HEIGHT }} className="border-b border-[#EEEAE0]" />
+              ))}
+
+              {/* Travel-time bands */}
+              {travels.map((w, i) => (
+                <div
+                  key={`tv-${i}`}
+                  data-testid={`travel-${dayIdx}-${i}`}
+                  title={w.label}
+                  style={{
+                    top: ((w.start_min - HOUR_START * 60) / 60) * HOUR_HEIGHT,
+                    height: ((w.end_min - w.start_min) / 60) * HOUR_HEIGHT,
+                    left: 2,
+                    right: 2,
+                    backgroundImage: "repeating-linear-gradient(45deg, rgba(176,124,96,0.15) 0 4px, transparent 4px 8px)",
+                    border: "1px dashed rgba(176,124,96,0.45)",
+                    borderRadius: 3,
+                    pointerEvents: "none",
+                  }}
+                  className="absolute text-[8px] font-mono text-[#946750] flex items-center justify-center"
+                >
+                  <span className="bg-white/70 px-1 rounded">{w.label}</span>
+                </div>
               ))}
 
               {/* Existing blocks */}

@@ -3,21 +3,23 @@ import { api, formatApiError } from "../lib/api";
 import PageHeader from "../components/PageHeader";
 import WeeklyPreview from "../components/WeeklyPreview";
 import { Button } from "../components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Input } from "../components/ui/input";
 import { toast } from "sonner";
 import {
-  GitMerge, MapPin, Heart, CheckCircle2, AlertTriangle, Sparkles,
-  UserPlus, Clock, Award, Car, CalendarCheck, Users, X, Filter, Plus, Trash2
+  Sparkles, ArrowLeft, ArrowRight, CheckCircle2, AlertTriangle,
+  Users, Heart, MapPin, Award, Clock, Car, CalendarCheck,
+  UserCheck, ClipboardList, GraduationCap,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { nextMonday } from "../lib/dates";
 
-const THERAPIST_ROLE_LABELS = {
-  bt: "BT",
-  program_manager: "PM",
-  bcba: "BCBA",
-};
+// -------- Discipline configuration --------
+const DISCIPLINES = [
+  { key: "bt",              label: "BT",   long: "Behavior Intervention", icon: UserCheck,     defaultHours: 10,   description: "Primary direct-care therapist (10 hr/week)" },
+  { key: "program_manager", label: "PM",   long: "Program Manager",       icon: ClipboardList, defaultHours: 2,    description: "Observes/supervises during BT sessions (2 hr/week)" },
+  { key: "bcba",            label: "BCBA", long: "BCBA",                  icon: GraduationCap, defaultHours: 0.75, description: "Senior clinical oversight (~3 hr/month, during BT sessions)" },
+];
+
+const palette = ["#274f38", "#B07C60", "#7B968B"];
 
 function CoverageBar({ covered, needed }) {
   const pct = needed > 0 ? Math.min(100, Math.round((covered / needed) * 100)) : 0;
@@ -27,90 +29,40 @@ function CoverageBar({ covered, needed }) {
       <div className="flex items-center justify-between text-xs mb-1">
         <span className="text-muted-ohana">Coverage</span>
         <span className="font-mono">
-          {covered.toFixed(1)} / {needed} hr <span className={full ? "text-[#274f38]" : "text-[#B07C60]"}>· {pct}%</span>
+          {covered.toFixed(2)} / {needed} hr <span className={full ? "text-[#274f38]" : "text-[#B07C60]"}>· {pct}%</span>
         </span>
       </div>
       <div className="w-full h-2 bg-[#F0EFEA] rounded-full overflow-hidden">
-        <div
-          style={{ width: `${pct}%`, backgroundColor: full ? "#274f38" : "#B07C60" }}
-          className="h-full transition-all duration-500"
-        />
+        <div style={{ width: `${pct}%`, backgroundColor: full ? "#274f38" : "#B07C60" }} className="h-full transition-all duration-500" />
       </div>
     </div>
   );
 }
 
-function TherapistSummary({ t }) {
+function OptionCard({ option, idx, isSelected, onSelect, color, testId }) {
+  const t = option.therapists[0];
   return (
-    <div className="flex items-center gap-3 py-2" data-testid={`team-member-${t.therapist_id}`}>
-      <div className="w-9 h-9 rounded-full bg-[#E5EBE8] text-[#274f38] flex items-center justify-center text-sm font-medium">
-        {t.therapist_name.split(" ").map(p => p[0]).slice(0, 2).join("")}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate">{t.therapist_name}</div>
-        <div className="text-xs text-muted-ohana flex items-center gap-3 flex-wrap">
-          <span className="font-medium text-[#274f38]" title="Therapist role">
-            {THERAPIST_ROLE_LABELS[t.therapist_role || "bt"] || t.therapist_role}
-          </span>
-          <span className="capitalize">{t.skill_level}</span>
-          {t.drive_minutes != null && (
-            <span
-              className="inline-flex items-center gap-1 font-mono"
-              title={
-                (t.peer_caseload_count || 0) > 0 && t.drive_minutes_home != null && t.inter_client_min_minutes != null
-                  ? `Ranking uses an average of drive from therapist home (${Number(t.drive_minutes_home).toFixed(0)} min) and best other-client home → this client (${Number(t.inter_client_min_minutes).toFixed(0)} min).`
-                  : "Drive time from therapist home to this client (or best available estimate)."
-              }
-            >
-              <Car size={10} /> {t.drive_minutes.toFixed(0)} min
-            </span>
-          )}
-          {(t.peer_caseload_count || 0) > 0 && t.inter_client_min_minutes != null && (
-            <span
-              className="text-[10px] text-muted-ohana font-mono max-w-[140px] leading-tight"
-              title="Driving between other clients homes and this client (min–max across caseload)"
-            >
-              Other clients → here: {t.inter_client_min_minutes.toFixed(0)}–{(t.inter_client_max_minutes ?? t.inter_client_min_minutes).toFixed(0)} min
-            </span>
-          )}
-          {t.is_existing_relationship && (
-            <span className="inline-flex items-center gap-1 text-[#B07C60]"><Heart size={10}/> Existing</span>
-          )}
-        </div>
-      </div>
-      <div className="text-right">
-        <div className="text-xs text-muted-ohana">Covers</div>
-        <div className="font-mono text-sm">{t.covered_hours} hr</div>
-      </div>
-    </div>
-  );
-}
-
-function OptionCard({ option, idx, isSelected, onSelect, testId }) {
-  const isMulti = option.type === "multi";
-  return (
-    <div
+    <button
+      type="button"
       data-testid={testId}
       onClick={onSelect}
-      className={`bg-surface rounded-lg p-5 cursor-pointer transition-all ${
+      className={`text-left bg-surface rounded-lg p-4 transition-all w-full ${
         isSelected
           ? "border-2 border-[#274f38] shadow-[0_12px_32px_rgba(24,35,30,0.10)]"
-          : "border border-soft card-shadow hover:shadow-[0_8px_24px_rgba(24,35,30,0.06)] hover:-translate-y-0.5"
+          : "border border-soft card-shadow hover:shadow-[0_8px_24px_rgba(24,35,30,0.06)]"
       }`}
     >
-      <div className="flex items-start justify-between gap-3 mb-3">
+      <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-md bg-[#E5EBE8] text-[#274f38] flex items-center justify-center text-xs font-semibold">
+          <div className="w-8 h-8 rounded-md flex items-center justify-center text-white text-xs font-semibold" style={{ backgroundColor: color }}>
             #{idx + 1}
           </div>
           <div>
-            <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold">
-              {isMulti ? `${option.therapists.length}-Therapist team` : "Single therapist"}
-            </div>
-            <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>
-              {isMulti
-                ? option.therapists.map(t => t.therapist_name.split(" ")[0]).join(" + ")
-                : option.therapists[0].therapist_name}
+            <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>{t.therapist_name}</div>
+            <div className="text-[11px] text-muted-ohana flex items-center gap-2 capitalize">
+              <span>{t.skill_level}</span>
+              {t.drive_minutes != null && <span className="inline-flex items-center gap-1"><Car size={10}/> {t.drive_minutes.toFixed(0)} min</span>}
+              {t.is_existing_relationship && <span className="text-[#B07C60] inline-flex items-center gap-1"><Heart size={10}/> existing</span>}
             </div>
           </div>
         </div>
@@ -119,26 +71,34 @@ function OptionCard({ option, idx, isSelected, onSelect, testId }) {
           <div className="text-2xl font-medium text-[#274f38]" style={{ fontFamily: "Outfit" }}>{option.score}</div>
         </div>
       </div>
-
       <CoverageBar covered={option.coverage_hours} needed={option.needed_hours} />
-
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {option.fully_covered ? (
-          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-[#E8F0EA] text-[#274f38] font-medium">
-            <CheckCircle2 size={11} /> Full coverage
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#E8F0EA] text-[#274f38] font-medium">
+            <CheckCircle2 size={10} /> Full coverage
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-[#FDF4E7] text-[#B07C60] font-medium">
-            <AlertTriangle size={11} /> {option.gap_hours} hr gap
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#FDF4E7] text-[#B07C60] font-medium">
+            <AlertTriangle size={10} /> {option.gap_hours.toFixed(2)} hr gap
           </span>
         )}
-        {option.tags.filter(t => t !== "Full coverage" && t !== "Partial coverage").map(t => (
-          <span key={t} className="text-[11px] px-2 py-0.5 rounded-full bg-[#F0EFEA] text-[#586960]">{t}</span>
-        ))}
       </div>
+    </button>
+  );
+}
 
-      <div className="mt-3 pt-3 border-t border-soft space-y-1">
-        {option.therapists.map(t => <TherapistSummary key={t.therapist_id} t={t} />)}
+function StepDot({ active, complete, label, sublabel }) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border-2 transition-colors ${
+        complete ? "bg-[#274f38] text-white border-[#274f38]" :
+        active ? "bg-white text-[#274f38] border-[#274f38]" :
+        "bg-white text-muted-ohana border-soft"
+      }`}>
+        {complete ? <CheckCircle2 size={14} /> : label}
+      </div>
+      <div className="min-w-0">
+        <div className={`text-xs uppercase tracking-[0.18em] font-semibold ${active || complete ? "text-[#274f38]" : "text-muted-ohana"}`}>{sublabel}</div>
       </div>
     </div>
   );
@@ -146,18 +106,19 @@ function OptionCard({ option, idx, isSelected, onSelect, testId }) {
 
 export default function MatchingPage() {
   const [clients, setClients] = useState([]);
+  const [step, setStep] = useState(0); // 0=client, 1=BT, 2=PM, 3=BCBA, 4=review
   const [selectedClientId, setSelectedClientId] = useState("");
   const [client, setClient] = useState(null);
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("single");
-  const [selectedOptionKey, setSelectedOptionKey] = useState(null);
+  const [teamHours, setTeamHours] = useState({ bt: 10, program_manager: 2, bcba: 0.75 });
+
+  // Per-discipline match results + selections
+  const [matches, setMatches] = useState({ bt: null, program_manager: null, bcba: null });
+  const [picked, setPicked] = useState({ bt: null, program_manager: null, bcba: null });
+  const [loadingDisc, setLoadingDisc] = useState(null);
+
   const [weekStart, setWeekStart] = useState(nextMonday());
+  const [recurringWeeks, setRecurringWeeks] = useState(26);
   const [confirming, setConfirming] = useState(false);
-  const [therapistFilter, setTherapistFilter] = useState("all"); // "all" | therapist_id
-  const [blockDetail, setBlockDetail] = useState(null); // {block, kind, blockIndex?, clientDetails?}
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [editedBlocks, setEditedBlocks] = useState(null); // null = use original; array = user-modified
 
   useEffect(() => {
     (async () => {
@@ -166,66 +127,116 @@ export default function MatchingPage() {
     })();
   }, []);
 
-  const matchableClients = useMemo(
-    () => (clients || []).filter((c) => !(c.assigned_therapist_ids && c.assigned_therapist_ids.length)),
-    [clients],
-  );
+  // ---- Client step ----
+  const startMatching = async () => {
+    if (!selectedClientId) { toast.error("Pick a client first"); return; }
+    const c = clients.find(x => x.id === selectedClientId);
+    setClient(c);
+    setMatches({ bt: null, program_manager: null, bcba: null });
+    setPicked({ bt: null, program_manager: null, bcba: null });
+    const ch = c.team_hours || {};
+    const merged = {
+      bt: ch.bt ?? 10,
+      program_manager: ch.program_manager ?? 2,
+      bcba: ch.bcba ?? 0.75,
+    };
+    setTeamHours(merged);
+    setStep(1);
+    await loadMatch("bt", merged.bt, []);
+  };
 
-  useEffect(() => {
-    if (!selectedClientId) return;
-    const ok = matchableClients.some((c) => c.id === selectedClientId);
-    if (!ok) setSelectedClientId("");
-  }, [matchableClients, selectedClientId]);
+  // ---- Match loaders per discipline ----
+  const anchorBlocksFromBT = () => {
+    const bt = picked.bt;
+    if (!bt) return [];
+    return bt.proposed_blocks.map(b => ({ day: b.day, start: b.start, end: b.end }));
+  };
 
-  const run = async () => {
-    if (!selectedClientId) {
-      toast.error("Select a client first");
-      return;
-    }
-    setLoading(true);
-    setResult(null);
-    setSelectedOptionKey(null);
+  const loadMatch = async (discipline, target, anchorBlocks) => {
+    setLoadingDisc(discipline);
     try {
-      const c = clients.find(x => x.id === selectedClientId);
-      setClient(c);
-      const { data } = await api.post("/match/smart", { client_id: selectedClientId, max_results: 10 });
-      setResult(data);
-      const hasFullSingle = data.single_options.some(o => o.fully_covered);
-      setTab(hasFullSingle ? "single" : (data.multi_options.length > 0 ? "multi" : "single"));
-      // auto-select top option of active tab
-      const top = (hasFullSingle ? data.single_options : (data.multi_options.length ? data.multi_options : data.single_options))[0];
-      if (top) setSelectedOptionKey(`${top.type}-0`);
+      const { data } = await api.post("/match/smart", {
+        client_id: selectedClientId,
+        discipline,
+        target_hours: target,
+        anchor_blocks: anchorBlocks || [],
+      });
+      setMatches((prev) => ({ ...prev, [discipline]: data }));
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || e.message);
     } finally {
-      setLoading(false);
+      setLoadingDisc(null);
     }
   };
 
-  const optionList = useMemo(() => {
-    if (!result) return [];
-    return tab === "single" ? result.single_options : result.multi_options;
-  }, [result, tab]);
+  const advanceTo = async (newStep) => {
+    setStep(newStep);
+    if (newStep === 2 && picked.bt && !matches.program_manager) {
+      await loadMatch("program_manager", teamHours.program_manager, anchorBlocksFromBT());
+    } else if (newStep === 3 && picked.bt && !matches.bcba) {
+      await loadMatch("bcba", teamHours.bcba, anchorBlocksFromBT());
+    }
+  };
 
-  const selectedOption = useMemo(() => {
-    if (!result || !selectedOptionKey) return null;
-    const [t, idxStr] = selectedOptionKey.split("-");
-    const list = t === "single" ? result.single_options : result.multi_options;
-    return list[parseInt(idxStr)] || null;
-  }, [result, selectedOptionKey]);
+  const pickOption = (discipline, option) => {
+    setPicked((prev) => ({ ...prev, [discipline]: option }));
+  };
 
-  const confirm = async () => {
-    if (!selectedOption || !weekStart) return;
+  // ---- Combined preview blocks + therapists ----
+  const allTherapists = useMemo(() => {
+    const out = [];
+    if (picked.bt) out.push({ ...picked.bt.therapists[0], discipline: "bt" });
+    if (picked.program_manager) out.push({ ...picked.program_manager.therapists[0], discipline: "program_manager" });
+    if (picked.bcba) out.push({ ...picked.bcba.therapists[0], discipline: "bcba" });
+    return out;
+  }, [picked]);
+
+  const allBlocks = useMemo(() => {
+    const out = [];
+    DISCIPLINES.forEach((d) => {
+      const opt = picked[d.key];
+      if (!opt) return;
+      opt.proposed_blocks.forEach((b) => out.push({ ...b }));
+    });
+    return out;
+  }, [picked]);
+
+  const allExisting = useMemo(() => {
+    const out = [];
+    DISCIPLINES.forEach((d) => {
+      const opt = picked[d.key];
+      if (!opt) return;
+      (opt.existing_blocks || []).forEach(b => out.push(b));
+    });
+    return out;
+  }, [picked]);
+
+  // ---- Confirm ----
+  const confirmTeam = async () => {
+    if (!picked.bt) { toast.error("Pick at least the BT before confirming."); return; }
     setConfirming(true);
     try {
+      // Combine all proposed blocks across disciplines
+      const proposed = [];
+      DISCIPLINES.forEach((d) => {
+        const opt = picked[d.key];
+        if (!opt) return;
+        opt.proposed_blocks.forEach(b => proposed.push(b));
+      });
       const { data } = await api.post("/match/confirm", {
-        client_id: result.client_id,
+        client_id: selectedClientId,
         week_start_date: weekStart,
-        proposed_blocks: activeBlocks,
+        proposed_blocks: proposed,
+        recurring_weeks: recurringWeeks,
       });
       const skipped = data.skipped?.length || 0;
-      toast.success(`Scheduled ${data.created} session${data.created !== 1 ? "s" : ""}${skipped ? ` (${skipped} skipped due to conflicts)` : ""}`);
-      run();
+      toast.success(`Scheduled ${data.created} session${data.created !== 1 ? "s" : ""} across ${data.weeks_scheduled} weeks${skipped ? ` (${skipped} skipped)` : ""}`);
+      // Reset
+      setStep(0);
+      setSelectedClientId("");
+      setClient(null);
+      setPicked({ bt: null, program_manager: null, bcba: null });
+      setMatches({ bt: null, program_manager: null, bcba: null });
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || e.message);
     } finally {
@@ -233,581 +244,324 @@ export default function MatchingPage() {
     }
   };
 
-  // Reset filter & edits whenever a new option is selected
-  useEffect(() => {
-    setTherapistFilter("all");
-    setEditedBlocks(null);
-  }, [selectedOptionKey]);
-
-  // Resolve the active blocks (user edits override the original proposal)
-  const activeBlocks = useMemo(() => {
-    if (!selectedOption) return [];
-    return editedBlocks ?? selectedOption.proposed_blocks;
-  }, [selectedOption, editedBlocks]);
-
-  const editedHours = useMemo(() => {
-    return activeBlocks.reduce((sum, b) => {
-      const [sh, sm] = b.start.split(":").map(Number);
-      const [eh, em] = b.end.split(":").map(Number);
-      return sum + Math.max(0, ((eh * 60 + em) - (sh * 60 + sm)) / 60);
-    }, 0);
-  }, [activeBlocks]);
-
-  const filteredProposed = useMemo(() => {
-    if (!selectedOption) return [];
-    if (therapistFilter === "all") return activeBlocks;
-    return activeBlocks.filter(b => b.therapist_id === therapistFilter);
-  }, [selectedOption, therapistFilter, activeBlocks]);
-
-  const filteredExisting = useMemo(() => {
-    if (!selectedOption) return [];
-    const all = selectedOption.existing_blocks || [];
-    if (therapistFilter === "all") return all;
-    return all.filter(b => b.therapist_id === therapistFilter);
-  }, [selectedOption, therapistFilter]);
-
-  // Find the index of a block within activeBlocks (so we can identify it for editing)
-  const findBlockIndex = (block) => {
-    return activeBlocks.findIndex(b =>
-      b.therapist_id === block.therapist_id &&
-      b.day === block.day &&
-      b.start === block.start &&
-      b.end === block.end
-    );
-  };
-
-  const handleBlockClick = async (block, kind) => {
-    if (kind === "proposed") {
-      const idx = findBlockIndex(block);
-      setBlockDetail({ block: { ...block }, kind, blockIndex: idx });
-      return;
-    }
-    setBlockDetail({ block, kind, clientDetails: null });
-    if (kind === "existing" && block.client_id) {
-      setLoadingDetail(true);
-      try {
-        const { data } = await api.get(`/clients/${block.client_id}`);
-        setBlockDetail({ block, kind, clientDetails: data });
-      } catch {
-        // ignore
-      } finally {
-        setLoadingDetail(false);
-      }
-    }
-  };
-
-  const updateProposedBlock = (index, patch) => {
-    const next = activeBlocks.slice();
-    next[index] = { ...next[index], ...patch };
-    setEditedBlocks(next);
-  };
-
-  const deleteProposedBlock = (index) => {
-    const next = activeBlocks.filter((_, i) => i !== index);
-    setEditedBlocks(next);
-    setBlockDetail(null);
-    toast.success("Block removed");
-  };
-
-  const addProposedBlock = () => {
-    if (!selectedOption) return;
-    const therapist = selectedOption.therapists[0];
-    const newBlock = {
-      therapist_id: therapist.therapist_id,
-      therapist_name: therapist.therapist_name,
-      day: 0,
-      day_label: "Mon",
-      start: "15:00",
-      end: "17:00",
-      hours: 2,
-    };
-    setEditedBlocks([...activeBlocks, newBlock]);
-    setBlockDetail({ block: newBlock, kind: "proposed", blockIndex: activeBlocks.length });
-  };
-
-  const resetEdits = () => {
-    setEditedBlocks(null);
-    toast.success("Reset to original proposal");
-  };
-
-  // Live conflict count: any active block overlapping an existing block (same therapist+day) or another active block (same therapist+day)
-  const conflictCount = useMemo(() => {
-    if (!selectedOption) return 0;
-    const toMin = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
-    const overlaps = (s1, e1, s2, e2) => s1 < e2 && s2 < e1;
-    let count = 0;
-    activeBlocks.forEach((b, i) => {
-      const bs = toMin(b.start), be = toMin(b.end);
-      let conflicted = false;
-      for (const ex of (selectedOption.existing_blocks || [])) {
-        if (ex.day !== b.day) continue;
-        if (ex.therapist_id && b.therapist_id && ex.therapist_id !== b.therapist_id) continue;
-        if (overlaps(bs, be, toMin(ex.start), toMin(ex.end))) { conflicted = true; break; }
-      }
-      if (!conflicted) {
-        for (let j = 0; j < activeBlocks.length; j++) {
-          if (j === i) continue;
-          const o = activeBlocks[j];
-          if (o.day !== b.day || o.therapist_id !== b.therapist_id) continue;
-          if (overlaps(bs, be, toMin(o.start), toMin(o.end))) { conflicted = true; break; }
-        }
-      }
-      if (conflicted) count++;
-    });
-    return count;
-  }, [selectedOption, activeBlocks]);
-
   return (
     <div>
       <PageHeader
-        title="Smart matching"
-        subtitle="Availability-aware therapist matching with proposed weekly schedule preview."
+        title="Team matching"
+        subtitle="Build a complete care team — BT first, then PM and BCBA who join the BT's sessions."
       />
-      <div className="px-10 pb-10 space-y-6">
-        {/* Step 1: Pick client */}
-        <div className="bg-surface border border-soft rounded-lg p-6 card-shadow">
-          <div className="flex items-end gap-4">
-            <div className="flex-1">
-              <label className="text-xs tracking-[0.18em] uppercase text-muted-ohana font-semibold flex items-center gap-2">
-                <UserPlus size={12} /> Step 1 · Select client
-              </label>
+
+      {/* ---- Stepper ---- */}
+      <div className="px-10 pt-2 pb-4">
+        <div className="bg-surface border border-soft rounded-lg p-4 card-shadow flex items-center justify-between gap-3 flex-wrap" data-testid="wizard-stepper">
+          {[
+            { idx: 0, label: "1", sub: "Client" },
+            { idx: 1, label: "2", sub: "BT" },
+            { idx: 2, label: "3", sub: "Program Manager" },
+            { idx: 3, label: "4", sub: "BCBA" },
+            { idx: 4, label: "5", sub: "Review & schedule" },
+          ].map((s, i, arr) => (
+            <React.Fragment key={s.idx}>
+              <StepDot
+                active={step === s.idx}
+                complete={step > s.idx && (s.idx === 0 ? !!client : (s.idx === 4 ? false : !!picked[["bt","program_manager","bcba"][s.idx - 1]]))}
+                label={s.label}
+                sublabel={s.sub}
+              />
+              {i < arr.length - 1 && <div className="flex-1 h-px bg-[#E3DFD5] hidden md:block"></div>}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-10 pb-10 space-y-5">
+        {/* ---- STEP 0: client ---- */}
+        {step === 0 && (
+          <div className="bg-surface border border-soft rounded-lg p-6 card-shadow" data-testid="step-client">
+            <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Step 1 · Pick a client</div>
+            <h2 className="text-xl mb-4" style={{ fontFamily: "Outfit" }}>Who needs a care team?</h2>
+            <div className="flex items-end gap-3">
               <select
                 data-testid="match-client-select"
                 value={selectedClientId}
                 onChange={(e) => setSelectedClientId(e.target.value)}
-                className="mt-2 w-full h-11 px-4 rounded-md border border-soft bg-white text-sm"
+                className="flex-1 h-11 px-4 rounded-md border border-soft bg-white text-sm"
               >
                 <option value="">— choose a client —</option>
-                {matchableClients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} · needs {c.needed_hours_per_week}hr/wk · {c.age_group}
-                  </option>
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} · needs {c.needed_hours_per_week}hr/wk · {c.age_group}</option>
                 ))}
               </select>
-              <p className="text-xs text-muted-ohana mt-2">
-                Only clients without an assigned therapist appear here. End an assignment on the Clients page to match again.
-              </p>
-              {clients.length > 0 && matchableClients.length === 0 && (
-                <p className="text-xs text-[#B07C60] mt-2" data-testid="no-matchable-clients">
-                  All clients already have at least one assigned therapist. Use Clients → End assignment to return someone to matching.
-                </p>
-              )}
+              <Button
+                data-testid="start-matching-btn"
+                onClick={startMatching}
+                disabled={!selectedClientId}
+                className="bg-primary-ohana hover:bg-[#1E3D2B] text-white h-11 px-6"
+              >
+                <Sparkles size={16} className="mr-2" /> Start matching
+              </Button>
             </div>
-            <Button
-              data-testid="run-smart-match-btn"
-              onClick={run}
-              disabled={loading || !selectedClientId || matchableClients.length === 0}
-              className="bg-primary-ohana hover:bg-[#1E3D2B] text-white h-11 px-6"
-            >
-              <Sparkles size={16} className="mr-2" /> {loading ? "Matching…" : "Run smart match"}
-            </Button>
-          </div>
-
-          {client && (
-            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm pt-4 border-t border-soft" data-testid="match-client-summary">
-              <div className="inline-flex items-center gap-1.5"><Clock size={13} /><span className="text-muted-ohana">Needs:</span> <span className="font-mono">{client.needed_hours_per_week} hr/wk</span></div>
-              <div className="inline-flex items-center gap-1.5"><Award size={13} /><span className="text-muted-ohana">Skill required:</span> <span className="capitalize">{client.skill_required}</span></div>
-              <div className="inline-flex items-center gap-1.5"><Heart size={13} /><span className="text-muted-ohana">Gender pref:</span> <span className="capitalize">{(client.gender_preference || "").replace("_", " ")}</span></div>
-              <div className="inline-flex items-center gap-1.5"><MapPin size={13} /><span className="truncate max-w-md">{client.home_address}</span></div>
-            </div>
-          )}
-
-          {result?.daily_targets && (
-            <div className="mt-3 flex flex-wrap gap-2 text-xs" data-testid="daily-targets-summary">
-              <span className="text-muted-ohana">Target hours / day (from client):</span>
-              {Object.entries(result.daily_targets).map(([day, hrs]) => (
-                <span key={day} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#E5EBE8] text-[#274f38] font-mono">
-                  {day} · {hrs}h
-                </span>
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              {DISCIPLINES.map((d, i) => (
+                <div key={d.key} className="border border-soft rounded-md p-3 bg-[#F9F8F5]">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-md flex items-center justify-center text-white" style={{ backgroundColor: palette[i] }}>
+                      <d.icon size={16}/>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium">{d.long}</div>
+                      <div className="text-[11px] text-muted-ohana">{d.defaultHours} hr/wk default</div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-ohana mt-2">{d.description}</div>
+                </div>
               ))}
             </div>
-          )}
-        </div>
-
-        {/* Step 2: Options */}
-        {result && (
-          <>
-            <Tabs value={tab} onValueChange={setTab} data-testid="match-tabs">
-              <TabsList className="bg-muted-soft">
-                <TabsTrigger value="single" data-testid="tab-single">
-                  <Users size={14} className="mr-2" /> One therapist
-                  <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded-full bg-white text-muted-ohana">{result.single_options.length}</span>
-                </TabsTrigger>
-                <TabsTrigger value="multi" data-testid="tab-multi" disabled={result.multi_options.length === 0}>
-                  <GitMerge size={14} className="mr-2" /> Multiple therapists
-                  <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded-full bg-white text-muted-ohana">{result.multi_options.length}</span>
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="single" className="mt-4">
-                {result.single_options.length === 0 && (
-                  <div className="bg-[#FDF4E7] border border-[#E3C68B] rounded-md p-4 text-sm text-[#7A5B2E]">
-                    No single therapist can cover this client based on current availability. Try the "Multiple therapists" tab.
-                  </div>
-                )}
-                {!result.single_options.some(o => o.fully_covered) && result.single_options.length > 0 && (
-                  <div className="bg-[#FDF4E7] border border-[#E3C68B] rounded-md p-4 text-sm text-[#7A5B2E] mb-4" data-testid="partial-warning">
-                    No single therapist can fully cover the client's {result.needed_hours} hr/week. The options below offer partial coverage — consider a multi-therapist team instead.
-                  </div>
-                )}
-              </TabsContent>
-              <TabsContent value="multi" className="mt-4">
-                {result.multi_options.length === 0 && (
-                  <div className="bg-[#F0EFEA] border border-soft rounded-md p-4 text-sm text-muted-ohana">
-                    Multi-therapist combinations are only generated when no single therapist can cover the client. The single-therapist tab is sufficient here.
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
-
-            {optionList.length > 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-6">
-                {/* Left: option cards */}
-                <div className="space-y-4">
-                  {optionList.map((opt, idx) => (
-                    <OptionCard
-                      key={idx}
-                      option={opt}
-                      idx={idx}
-                      isSelected={selectedOptionKey === `${opt.type}-${idx}`}
-                      onSelect={() => setSelectedOptionKey(`${opt.type}-${idx}`)}
-                      testId={`option-card-${opt.type}-${idx}`}
-                    />
-                  ))}
-                </div>
-
-                {/* Right: weekly preview */}
-                <div className="space-y-4 lg:sticky lg:top-6 self-start">
-                  <div className="bg-surface border border-soft rounded-lg p-5 card-shadow">
-                    <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold flex items-center gap-2">
-                          Step 2 · Preview
-                          {editedBlocks && (
-                            <span data-testid="modified-badge" className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#FDF4E7] text-[#B07C60] normal-case tracking-normal">Modified</span>
-                          )}
-                        </div>
-                        <h3 className="text-lg font-medium mt-0.5" style={{ fontFamily: "Outfit" }}>
-                          Proposed weekly schedule
-                        </h3>
-                      </div>
-                      {selectedOption && (
-                        <div className="flex items-center gap-3">
-                          {editedBlocks && (
-                            <button
-                              data-testid="reset-edits-btn"
-                              onClick={resetEdits}
-                              className="text-xs text-[#586960] hover:text-[#274f38] underline-offset-2 hover:underline"
-                            >
-                              Reset to original
-                            </button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            data-testid="add-block-btn"
-                            onClick={addProposedBlock}
-                          >
-                            <Plus size={13} className="mr-1" /> Add block
-                          </Button>
-                          <div className="text-right">
-                            <div className="text-xs text-muted-ohana">{activeBlocks.length} blocks</div>
-                            <div className="font-mono text-sm">{editedHours.toFixed(1)} hr / wk</div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    {conflictCount > 0 && (
-                      <div data-testid="conflict-banner" className="mb-3 flex items-center gap-2 text-xs px-3 py-2 rounded-md bg-[#FCEBEB] border border-[#F4D6D6] text-[#B85C5C]">
-                        <AlertTriangle size={13} />
-                        <span>
-                          {conflictCount} block{conflictCount > 1 ? "s" : ""} overlap{conflictCount === 1 ? "s" : ""} an existing booking or another proposed block. Drag, edit, or remove to resolve before confirming.
-                        </span>
-                      </div>
-                    )}
-                    <p className="text-xs text-muted-ohana mb-2">
-                      Drag a block vertically to change time, horizontally to change day. Click to edit details.
-                      {" "}
-                      We place each day in the earliest open slot for that therapist inside your window, then align Mon–Fri to the same clock when every day can still fit it. If times still differ, that therapist has other sessions or travel buffers blocking the earlier slot on those weekdays—totals still match your targets. Drag a block to adjust.
-                    </p>
-
-                    {selectedOption ? (
-                      <>
-                        <div className="mb-3 flex flex-wrap items-center gap-3 text-xs">
-                          {selectedOption.therapists.map((t, i) => {
-                            const colors = ["#274f38", "#B07C60", "#7B968B"];
-                            return (
-                              <span key={t.therapist_id} className="inline-flex items-center gap-1.5">
-                                <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: colors[i % colors.length] }}></span>
-                                {t.therapist_name}
-                              </span>
-                            );
-                          })}
-                          {(selectedOption.existing_blocks || []).length > 0 && (
-                            <span className="inline-flex items-center gap-1.5 text-muted-ohana">
-                              <span
-                                className="w-3 h-3 rounded-sm border border-[#A1ACA6]"
-                                style={{ backgroundImage: "repeating-linear-gradient(135deg, #DCE3E0 0 3px, #E5EBE8 3px 6px)" }}
-                              ></span>
-                              Existing booking
-                            </span>
-                          )}
-                        </div>
-
-                        {selectedOption.therapists.length > 1 && (
-                          <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="therapist-filter-chips">
-                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-ohana"><Filter size={11} /> Show:</span>
-                            <button
-                              type="button"
-                              data-testid="filter-chip-all"
-                              onClick={() => setTherapistFilter("all")}
-                              className={`text-[11px] px-2.5 py-1 rounded-full transition-colors ${therapistFilter === "all" ? "bg-[#274f38] text-white" : "bg-[#F0EFEA] text-[#586960] hover:bg-[#E5EBE8]"}`}
-                            >
-                              All therapists
-                            </button>
-                            {selectedOption.therapists.map((t, i) => {
-                              const colors = ["#274f38", "#B07C60", "#7B968B"];
-                              const active = therapistFilter === t.therapist_id;
-                              return (
-                                <button
-                                  type="button"
-                                  key={t.therapist_id}
-                                  data-testid={`filter-chip-${t.therapist_id}`}
-                                  onClick={() => setTherapistFilter(t.therapist_id)}
-                                  style={active ? { backgroundColor: colors[i % colors.length], color: "white" } : undefined}
-                                  className={`text-[11px] px-2.5 py-1 rounded-full transition-colors flex items-center gap-1.5 ${!active && "bg-[#F0EFEA] text-[#586960] hover:bg-[#E5EBE8]"}`}
-                                >
-                                  {!active && <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colors[i % colors.length] }}></span>}
-                                  {t.therapist_name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        <WeeklyPreview
-                          blocks={filteredProposed}
-                          existingBlocks={filteredExisting}
-                          therapists={selectedOption.therapists}
-                          onBlockClick={handleBlockClick}
-                          onBlockMove={(idx, patch) => {
-                            // idx is the index in filteredProposed; map back to activeBlocks
-                            const block = filteredProposed[idx];
-                            const realIdx = activeBlocks.indexOf(block);
-                            const targetIdx = realIdx >= 0 ? realIdx : idx;
-                            const dayLabels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-                            updateProposedBlock(targetIdx, { ...patch, day_label: dayLabels[patch.day] });
-                          }}
-                        />
-                      </>
-                    ) : (
-                      <div className="text-sm text-muted-ohana p-6 text-center">Select an option on the left to preview the weekly schedule.</div>
-                    )}
-                  </div>
-
-                  {/* Confirm */}
-                  {selectedOption && (
-                    <div className="bg-surface border border-soft rounded-lg p-5 card-shadow" data-testid="confirm-panel">
-                      <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Step 3 · Schedule</div>
-                      <div className="flex items-end gap-3">
-                        <div className="flex-1">
-                          <label className="text-xs text-muted-ohana mb-1 block">Apply starting Monday</label>
-                          <Input
-                            type="date"
-                            data-testid="confirm-week-start"
-                            value={weekStart}
-                            onChange={(e) => setWeekStart(e.target.value)}
-                          />
-                        </div>
-                        <Button
-                          data-testid="confirm-match-btn"
-                          onClick={confirm}
-                          disabled={confirming || !weekStart || selectedOption.proposed_blocks.length === 0}
-                          className="bg-primary-ohana hover:bg-[#1E3D2B] text-white"
-                        >
-                          <CalendarCheck size={16} className="mr-2" />
-                          {confirming ? "Scheduling…" : `Confirm & schedule ${activeBlocks.length} block${activeBlocks.length !== 1 ? "s" : ""}`}
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-ohana mt-2">
-                        Sessions will be created on the week starting {weekStart}. Conflicts with existing bookings are skipped.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
+          </div>
         )}
 
-        {!result && !loading && (
-          <div className="bg-surface border border-soft rounded-lg p-10 text-center text-muted-ohana card-shadow">
-            <Sparkles size={32} className="mx-auto mb-3 text-[#274f38]" />
-            <div className="text-base font-medium text-[#18231E]">Select a client and run smart matching</div>
-            <p className="text-sm mt-1 max-w-md mx-auto">
-              We'll intersect their availability with each therapist's free time, prefer a single therapist for full coverage, and otherwise build a multi-therapist team.
-            </p>
+        {/* ---- STEPS 1-3: discipline matching ---- */}
+        {step >= 1 && step <= 3 && client && (
+          <DisciplineStep
+            stepIdx={step}
+            disciplineKey={["bt","program_manager","bcba"][step - 1]}
+            client={client}
+            teamHours={teamHours}
+            matches={matches}
+            picked={picked}
+            allBlocks={allBlocks}
+            allExisting={allExisting}
+            allTherapists={allTherapists}
+            loadingDisc={loadingDisc}
+            onPick={pickOption}
+            onBack={() => advanceTo(step - 1)}
+            onNext={() => advanceTo(step + 1)}
+            onSkip={() => advanceTo(step + 1)}
+          />
+        )}
+
+        {/* ---- STEP 4: review & confirm ---- */}
+        {step === 4 && (
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-5" data-testid="step-review">
+            <div className="space-y-4">
+              <div className="bg-surface border border-soft rounded-lg p-5 card-shadow">
+                <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Step 5 · Review the team</div>
+                <h2 className="text-xl mb-4" style={{ fontFamily: "Outfit" }}>Confirm care team for {client?.name}</h2>
+                <div className="space-y-2">
+                  {DISCIPLINES.map((d, i) => {
+                    const opt = picked[d.key];
+                    return (
+                      <div key={d.key} className="border border-soft rounded-md p-3 flex items-center gap-3" data-testid={`review-${d.key}`}>
+                        <div className="w-9 h-9 rounded-md flex items-center justify-center text-white" style={{ backgroundColor: palette[i] }}>
+                          <d.icon size={16}/>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">{d.long}</div>
+                          {opt ? (
+                            <>
+                              <div className="font-medium">{opt.therapists[0].therapist_name}</div>
+                              <div className="text-[11px] text-muted-ohana">
+                                {opt.coverage_hours.toFixed(2)} / {opt.needed_hours} hr per week
+                                {opt.gap_hours > 0 && ` · ${opt.gap_hours.toFixed(2)} hr gap`}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-sm text-muted-ohana italic">— skipped —</div>
+                          )}
+                        </div>
+                        {opt ? <CheckCircle2 size={18} className="text-[#274f38]"/> : <span className="text-xs text-muted-ohana">optional</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="bg-surface border border-soft rounded-lg p-5 card-shadow space-y-3">
+                <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold">Recurrence</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-ohana">Start the week of</label>
+                    <Input type="date" data-testid="confirm-week-start" value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-ohana">Recurring weeks</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={104}
+                      data-testid="confirm-recurring-weeks"
+                      value={recurringWeeks}
+                      onChange={(e) => setRecurringWeeks(parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-ohana">
+                  Sessions repeat weekly until you cancel the series. Default is 26 weeks (~6 months).
+                </p>
+                <Button
+                  data-testid="confirm-team-btn"
+                  onClick={confirmTeam}
+                  disabled={confirming || !picked.bt}
+                  className="w-full bg-primary-ohana hover:bg-[#1E3D2B] text-white"
+                >
+                  <CalendarCheck size={16} className="mr-2" />
+                  {confirming ? "Scheduling…" : "Confirm & schedule recurring team"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setStep(3)}
+                  className="w-full"
+                >
+                  <ArrowLeft size={14} className="mr-1.5"/> Back to BCBA step
+                </Button>
+              </div>
+            </div>
+
+            <div className="bg-surface border border-soft rounded-lg p-5 card-shadow lg:sticky lg:top-6 self-start">
+              <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Combined weekly schedule</div>
+              <h3 className="text-lg mb-3" style={{ fontFamily: "Outfit" }}>{allBlocks.length} blocks · {allBlocks.reduce((s, b) => {
+                const [sh, sm] = b.start.split(":").map(Number);
+                const [eh, em] = b.end.split(":").map(Number);
+                return s + ((eh*60+em) - (sh*60+sm)) / 60;
+              }, 0).toFixed(1)} hr / wk</h3>
+              <div className="mb-3 flex flex-wrap gap-3 text-xs">
+                {allTherapists.map((t, i) => (
+                  <span key={t.therapist_id} className="inline-flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: palette[i % palette.length] }}></span>
+                    {t.therapist_name} <span className="text-muted-ohana">({DISCIPLINES.find(d=>d.key===t.discipline)?.label})</span>
+                  </span>
+                ))}
+              </div>
+              <WeeklyPreview blocks={allBlocks} existingBlocks={allExisting} therapists={allTherapists} />
+            </div>
           </div>
         )}
       </div>
+    </div>
+  );
+}
 
-      {/* Block detail dialog */}
-      <Dialog open={!!blockDetail} onOpenChange={(o) => !o && setBlockDetail(null)}>
-        <DialogContent className="max-w-md bg-white" data-testid="block-detail-dialog">
-          <DialogHeader>
-            <DialogTitle style={{ fontFamily: "Outfit" }}>
-              {blockDetail?.kind === "existing" ? "Existing booking" : "Proposed session"}
-            </DialogTitle>
-          </DialogHeader>
-          {blockDetail && (
-            <div className="space-y-4 text-sm pt-2">
-              {blockDetail.kind === "existing" && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Day</div>
-                    <div className="font-medium mt-1">{blockDetail.block.day_label}</div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold">Time</div>
-                    <div className="font-mono mt-1">{blockDetail.block.start} – {blockDetail.block.end}</div>
-                  </div>
-                </div>
-              )}
+// --- Discipline step (BT, PM, or BCBA) ---
+function DisciplineStep({ stepIdx, disciplineKey, client, teamHours, matches, picked, allBlocks, allExisting, allTherapists, loadingDisc, onPick, onBack, onNext, onSkip }) {
+  const d = DISCIPLINES.find(x => x.key === disciplineKey);
+  const result = matches[disciplineKey];
+  const target = teamHours[disciplineKey];
+  const selected = picked[disciplineKey];
+  const isLoading = loadingDisc === disciplineKey;
+  const opts = result?.single_options || [];
+  const noOptions = !isLoading && result && opts.length === 0;
+  const colorIdx = DISCIPLINES.findIndex(x => x.key === disciplineKey);
+  const accentColor = palette[colorIdx];
 
-              {blockDetail.kind === "existing" ? (
-                <>
-                  <div className="border-t border-soft pt-4">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Client</div>
-                    {loadingDetail && <div className="text-xs text-muted-ohana">Loading details…</div>}
-                    {blockDetail.clientDetails ? (
-                      <div className="space-y-2">
-                        <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>{blockDetail.clientDetails.name}</div>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                          <div><span className="text-muted-ohana">Age group:</span> <span className="capitalize">{blockDetail.clientDetails.age_group}</span></div>
-                          <div><span className="text-muted-ohana">Skill required:</span> <span className="capitalize">{blockDetail.clientDetails.skill_required}</span></div>
-                          <div><span className="text-muted-ohana">Gender pref:</span> <span className="capitalize">{(blockDetail.clientDetails.gender_preference || "").replace("_", " ")}</span></div>
-                          <div><span className="text-muted-ohana">Hours:</span> <span className="font-mono">{blockDetail.clientDetails.scheduled_hours_per_week || 0}/{blockDetail.clientDetails.needed_hours_per_week} hr/wk</span></div>
-                        </div>
-                        {blockDetail.clientDetails.home_address && (
-                          <div className="text-xs text-muted-ohana inline-flex items-start gap-1.5"><MapPin size={12} className="mt-0.5 shrink-0" />{blockDetail.clientDetails.home_address}</div>
-                        )}
-                        {blockDetail.clientDetails.insurance?.plan && (
-                          <div className="text-xs"><span className="text-muted-ohana">Insurance:</span> {blockDetail.clientDetails.insurance.plan} · {blockDetail.clientDetails.insurance.authorized_hours_per_week} hr authorized</div>
-                        )}
-                      </div>
-                    ) : (
-                      !loadingDetail && (
-                        <div className="text-base font-medium">{blockDetail.block.client_name}</div>
-                      )
-                    )}
-                  </div>
-                  <div className="bg-[#FDF4E7] border border-[#E3C68B] text-[#7A5B2E] text-xs rounded-md p-3">
-                    This time slot is already booked. The matcher routed around it automatically.
-                  </div>
-                </>
-              ) : (
-                <div className="border-t border-soft pt-4 space-y-4">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-2">Therapist</div>
-                    {selectedOption && selectedOption.therapists.length > 1 ? (
-                      <select
-                        data-testid="edit-block-therapist"
-                        value={blockDetail.block.therapist_id}
-                        onChange={(e) => {
-                          const t = selectedOption.therapists.find(x => x.therapist_id === e.target.value);
-                          const next = { ...blockDetail.block, therapist_id: t.therapist_id, therapist_name: t.therapist_name };
-                          setBlockDetail({ ...blockDetail, block: next });
-                          if (blockDetail.blockIndex >= 0) {
-                            updateProposedBlock(blockDetail.blockIndex, { therapist_id: t.therapist_id, therapist_name: t.therapist_name });
-                          }
-                        }}
-                        className="w-full h-10 px-3 rounded-md border border-soft bg-white text-sm"
-                      >
-                        {selectedOption.therapists.map(t => (
-                          <option key={t.therapist_id} value={t.therapist_id}>{t.therapist_name}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="text-base font-medium" style={{ fontFamily: "Outfit" }}>{blockDetail.block.therapist_name}</div>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-1">Day</div>
-                      <select
-                        data-testid="edit-block-day"
-                        value={blockDetail.block.day}
-                        onChange={(e) => {
-                          const day = parseInt(e.target.value);
-                          const dayLabels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-                          const next = { ...blockDetail.block, day, day_label: dayLabels[day] };
-                          setBlockDetail({ ...blockDetail, block: next });
-                          if (blockDetail.blockIndex >= 0) {
-                            updateProposedBlock(blockDetail.blockIndex, { day, day_label: dayLabels[day] });
-                          }
-                        }}
-                        className="w-full h-10 px-3 rounded-md border border-soft bg-white text-sm"
-                      >
-                        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d, i) => <option key={i} value={i}>{d}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-1">Start</div>
-                      <Input
-                        type="time"
-                        data-testid="edit-block-start"
-                        value={blockDetail.block.start}
-                        onChange={(e) => {
-                          const start = e.target.value;
-                          const next = { ...blockDetail.block, start };
-                          setBlockDetail({ ...blockDetail, block: next });
-                          if (blockDetail.blockIndex >= 0) updateProposedBlock(blockDetail.blockIndex, { start });
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-1">End</div>
-                      <Input
-                        type="time"
-                        data-testid="edit-block-end"
-                        value={blockDetail.block.end}
-                        onChange={(e) => {
-                          const end = e.target.value;
-                          const next = { ...blockDetail.block, end };
-                          setBlockDetail({ ...blockDetail, block: next });
-                          if (blockDetail.blockIndex >= 0) updateProposedBlock(blockDetail.blockIndex, { end });
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between pt-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      data-testid="delete-block-btn"
-                      onClick={() => deleteProposedBlock(blockDetail.blockIndex)}
-                      className="text-[#B85C5C] border-[#F4D6D6] hover:bg-[#FCEBEB]"
-                    >
-                      <Trash2 size={14} className="mr-1.5" /> Remove block
-                    </Button>
-                    <Button
-                      type="button"
-                      data-testid="close-block-btn"
-                      onClick={() => setBlockDetail(null)}
-                      className="bg-primary-ohana hover:bg-[#1E3D2B] text-white"
-                    >
-                      Done
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-ohana">
-                    Edits are local. Conflicts are checked on the server when you click "Confirm & schedule" — any block that conflicts with an existing booking is skipped (you'll see the count in the toast).
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+  // Build preview combining current selections + the option being inspected (preview)
+  const [hovered, setHovered] = useState(null);
+  const previewBlocks = useMemo(() => {
+    const blocks = [];
+    DISCIPLINES.forEach((dd) => {
+      const opt = dd.key === disciplineKey ? (selected || hovered) : picked[dd.key];
+      if (!opt) return;
+      opt.proposed_blocks.forEach(b => blocks.push(b));
+    });
+    return blocks;
+  }, [picked, selected, hovered, disciplineKey]);
+
+  const previewTherapists = useMemo(() => {
+    const out = [];
+    DISCIPLINES.forEach((dd) => {
+      const opt = dd.key === disciplineKey ? (selected || hovered) : picked[dd.key];
+      if (!opt) return;
+      out.push({ ...opt.therapists[0], discipline: dd.key });
+    });
+    return out;
+  }, [picked, selected, hovered, disciplineKey]);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-5" data-testid={`step-${disciplineKey}`}>
+      {/* Left: option list */}
+      <div className="space-y-3">
+        <div className="bg-surface border border-soft rounded-lg p-5 card-shadow">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold">Step {stepIdx + 1} · {d.long}</div>
+            {disciplineKey !== "bt" && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FDF4E7] text-[#B07C60] uppercase tracking-wider">Joins BT sessions</span>
+            )}
+          </div>
+          <h2 className="text-xl mt-1" style={{ fontFamily: "Outfit" }}>Pick a {d.label}</h2>
+          <p className="text-sm text-muted-ohana mt-1">
+            Need <span className="font-mono">{target}</span> hr/week. {disciplineKey !== "bt" && "Available windows are constrained to overlap the BT's proposed schedule."}
+          </p>
+        </div>
+
+        {isLoading && (
+          <div className="text-sm text-muted-ohana px-2" data-testid="step-loading">Computing matches…</div>
+        )}
+
+        {noOptions && (
+          <div className="bg-[#FDF4E7] border border-[#E3C68B] rounded-md p-4 text-sm text-[#7A5B2E]" data-testid="step-no-options">
+            No {d.label} matches the BT's schedule.
+            {disciplineKey !== "bt"
+              ? ` Make sure at least one therapist is tagged as “${d.long}” in Therapists, with availability that overlaps the BT's proposed blocks.`
+              : ` Add a BT therapist with availability that overlaps the client's window.`}
+          </div>
+        )}
+
+        {opts.map((o, i) => (
+          <div
+            key={i}
+            onMouseEnter={() => setHovered(o)}
+            onMouseLeave={() => setHovered(null)}
+          >
+            <OptionCard
+              option={o}
+              idx={i}
+              color={accentColor}
+              isSelected={selected === o}
+              onSelect={() => onPick(disciplineKey, selected === o ? null : o)}
+              testId={`option-${disciplineKey}-${i}`}
+            />
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between gap-3 pt-3">
+          <Button variant="outline" onClick={onBack} data-testid="step-back">
+            <ArrowLeft size={14} className="mr-1.5" /> Back
+          </Button>
+          <div className="flex gap-2">
+            {disciplineKey !== "bt" && (
+              <Button variant="outline" onClick={onSkip} data-testid="step-skip">Skip {d.label}</Button>
+            )}
+            <Button
+              onClick={onNext}
+              disabled={disciplineKey === "bt" && !selected}
+              className="bg-primary-ohana hover:bg-[#1E3D2B] text-white"
+              data-testid="step-next"
+            >
+              {selected ? `Continue with ${selected.therapists[0].therapist_name.split(" ")[0]}` : "Continue"} <ArrowRight size={14} className="ml-1.5" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: live weekly preview */}
+      <div className="bg-surface border border-soft rounded-lg p-5 card-shadow lg:sticky lg:top-6 self-start">
+        <div className="text-xs uppercase tracking-[0.18em] text-muted-ohana font-semibold mb-1">Live preview</div>
+        <h3 className="text-lg" style={{ fontFamily: "Outfit" }}>Team week so far</h3>
+        <p className="text-xs text-muted-ohana mb-3">Hover an option on the left to preview it; click to pick.</p>
+        <div className="mb-3 flex flex-wrap gap-3 text-xs">
+          {previewTherapists.map((t, i) => (
+            <span key={t.therapist_id} className="inline-flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: palette[i % palette.length] }}></span>
+              {t.therapist_name}
+              <span className="text-muted-ohana">({DISCIPLINES.find(dd => dd.key === t.discipline)?.label})</span>
+            </span>
+          ))}
+          {previewTherapists.length === 0 && <span className="text-muted-ohana">No selections yet.</span>}
+        </div>
+        <WeeklyPreview blocks={previewBlocks} existingBlocks={[]} therapists={previewTherapists} />
+        <div className="mt-3 text-xs text-muted-ohana inline-flex items-center gap-1.5">
+          <MapPin size={12}/> Client: {client.home_address}
+        </div>
+      </div>
     </div>
   );
 }

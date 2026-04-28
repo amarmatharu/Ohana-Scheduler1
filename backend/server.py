@@ -96,6 +96,12 @@ async def lifespan(_app: FastAPI):
     await db.sessions.create_index("id", unique=True)
     await db.sessions.create_index([("therapist_id", 1), ("date", 1)])
     await db.sessions.create_index([("client_id", 1), ("date", 1)])
+    await db.sessions.create_index("series_id", sparse=True)
+    # Default any existing therapist without a role to BT (clinical-default)
+    await db.therapists.update_many(
+        {"$or": [{"therapist_role": {"$exists": False}}, {"therapist_role": None}, {"therapist_role": ""}]},
+        {"$set": {"therapist_role": "bt"}},
+    )
     # TTL index — Mongo reaps stale brute-force counter entries automatically
     # once the per-document `expires_at` Date passes.
     await db.login_attempts.create_index("expires_at", expireAfterSeconds=0)
@@ -160,13 +166,17 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             and request.url.path.startswith("/api")
             and request.url.path not in _CSRF_EXEMPT_PATHS
         ):
-            cookie = request.cookies.get(CSRF_COOKIE_NAME)
-            header = request.headers.get("X-CSRF-Token")
-            if not cookie or not header or not secrets.compare_digest(cookie, header):
-                return JSONResponse(
-                    status_code=403,
-                    content={"detail": "CSRF token missing or invalid"},
-                )
+            # Bearer-token auth is CSRF-immune (the Authorization header can't be set
+            # cross-origin without a preflight that the server explicitly approves).
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                cookie = request.cookies.get(CSRF_COOKIE_NAME)
+                header = request.headers.get("X-CSRF-Token")
+                if not cookie or not header or not secrets.compare_digest(cookie, header):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "CSRF token missing or invalid"},
+                    )
         return await call_next(request)
 
 
@@ -417,93 +427,184 @@ async def match_for_client(body: MatchRequest, user: dict = Depends(require_role
 
 
 @api.post("/match/smart")
-async def match_smart(body: MatchRequest, user: dict = Depends(require_role("admin"))):
-    client = await db.clients.find_one({"id": body.client_id}, {"_id": 0})
+async def match_smart(body: dict, user: dict = Depends(require_role("admin"))):
+    """Smart match for a single discipline. Body:
+       {client_id, discipline?: 'bt'|'program_manager'|'bcba',
+        anchor_blocks?: [{day, start, end}], target_hours?: float}
+    """
+    client_id = body.get("client_id")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id required")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    return await smart_match(db, client)
+    discipline = body.get("discipline") or "bt"
+    target_hours = body.get("target_hours")
+    anchor_blocks = body.get("anchor_blocks") or []
+    anchor_by_day = None
+    if anchor_blocks:
+        anchor_by_day = {}
+        for b in anchor_blocks:
+            d = int(b["day"])
+            sh, sm = b["start"].split(":"); s = int(sh) * 60 + int(sm)
+            eh, em = b["end"].split(":"); e = int(eh) * 60 + int(em)
+            anchor_by_day.setdefault(d, []).append((s, e))
+    return await smart_match(
+        db, client,
+        discipline=discipline,
+        anchor_blocks_by_day=anchor_by_day,
+        target_hours_override=target_hours,
+    )
+
+
+# Default discipline weekly hours when client.team_hours is missing
+DEFAULT_TEAM_HOURS = {"bt": 10.0, "program_manager": 2.0, "bcba": 0.75}
+
+
+@api.post("/match/team")
+async def match_team(body: dict, user: dict = Depends(require_role("admin"))):
+    """Build a full BT → PM → BCBA team for a client in one call.
+    Body: {client_id, bt_therapist_id?: optional pre-selected BT}
+    Returns: {client, bt_options, pm_options (post-BT), bcba_options (post-BT), default_team_hours}
+
+    The frontend wizard typically calls /match/smart per discipline; this endpoint is a
+    convenience that returns top BT candidates so the UI can render a clear starting point.
+    """
+    client_id = body.get("client_id")
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id required")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    team_hours = {**DEFAULT_TEAM_HOURS, **(client.get("team_hours") or {})}
+    bt_result = await smart_match(db, client, discipline="bt", target_hours_override=team_hours.get("bt"))
+    return {
+        "client_id": client["id"],
+        "client_name": client["name"],
+        "team_hours": team_hours,
+        "bt_options": bt_result.get("single_options", []),
+        "bt_multi_options": bt_result.get("multi_options", []),
+    }
 
 
 @api.post("/match/confirm")
 async def match_confirm(payload: dict, user: dict = Depends(require_role("admin"))):
-    """Apply a smart-match option: create session blocks for each proposed_blocks entry.
+    """Apply a smart-match option: create recurring weekly session blocks.
 
-    Body: {client_id, week_start_date (YYYY-MM-DD), proposed_blocks: [{therapist_id, day, start, end}, ...]}
+    Body: {
+      client_id, week_start_date (YYYY-MM-DD),
+      proposed_blocks: [{therapist_id, day, start, end}, ...],
+      recurring_weeks?: int (default 26),
+    }
+    Sessions are created weekly for `recurring_weeks` weeks, all sharing a `series_id`
+    so the whole series can be cancelled with one call.
     """
     client_id = payload.get("client_id")
     week_start = payload.get("week_start_date")
     proposed = payload.get("proposed_blocks") or []
+    recurring_weeks = max(1, int(payload.get("recurring_weeks") or 26))
     if not client_id or not week_start or not proposed:
         raise HTTPException(status_code=400, detail="client_id, week_start_date, and proposed_blocks are required.")
     try:
         ws = datetime.strptime(week_start, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="week_start_date must be YYYY-MM-DD")
-    # Proposed block `day` is 0=Mon … 6=Sun; session_date = week_start + day must align to real weekdays.
     if ws.weekday() != 0:
-        raise HTTPException(
-            status_code=400,
-            detail="week_start_date must be a Monday (proposed blocks use Mon=0 … Sun=6).",
-        )
+        raise HTTPException(status_code=400, detail="week_start_date must be a Monday (proposed blocks use Mon=0 … Sun=6).")
 
     created = []
     skipped = []
     therapist_ids = set()
-    for blk in proposed:
-        try:
-            day = int(blk["day"])
-            session_date = (ws + timedelta(days=day)).isoformat()
-            therapist_id = blk["therapist_id"]
-            new_block = {
-                "therapist_id": therapist_id,
-                "client_id": client_id,
-                "date": session_date,
-                "start_time": blk["start"],
-                "end_time": blk["end"],
-                "notes": blk.get("notes"),
-            }
-            existing = await db.sessions.find(
-                {"therapist_id": therapist_id, "date": session_date, "status": {"$ne": "cancelled"}},
-                {"_id": 0},
-            ).to_list(100)
-            errors, warnings, travel = validate_new_block(new_block, existing)
-            if errors:
-                skipped.append({"block": new_block, "errors": errors})
-                continue
-            rest, lunch = compute_session_flags(new_block)
-            block = SessionBlock(
-                **new_block,
-                rest_break_required=rest,
-                lunch_break_required=lunch,
-                travel_minutes_before=travel,
-            )
-            await db.sessions.insert_one(block.model_dump())
-            therapist_ids.add(therapist_id)
-            created.append(block.model_dump())
-        except Exception as e:
-            skipped.append({"block": blk, "errors": [str(e)]})
+    series_by_block = {}  # (therapist_id, day, start, end) -> series_id
 
-    # update relationships
+    for week_idx in range(recurring_weeks):
+        week_offset = timedelta(days=7 * week_idx)
+        for blk in proposed:
+            try:
+                day = int(blk["day"])
+                session_date = (ws + week_offset + timedelta(days=day)).isoformat()
+                therapist_id = blk["therapist_id"]
+                key = (therapist_id, day, blk["start"], blk["end"])
+                series_id = series_by_block.setdefault(key, str(uuid.uuid4()))
+                # Snapshot therapist discipline for scheduled block
+                t_doc = await db.therapists.find_one({"id": therapist_id}, {"_id": 0, "therapist_role": 1})
+                discipline = (t_doc or {}).get("therapist_role") or "bt"
+                new_block = {
+                    "therapist_id": therapist_id,
+                    "client_id": client_id,
+                    "date": session_date,
+                    "start_time": blk["start"],
+                    "end_time": blk["end"],
+                    "notes": blk.get("notes"),
+                }
+                existing = await db.sessions.find(
+                    {"therapist_id": therapist_id, "date": session_date, "status": {"$ne": "cancelled"}},
+                    {"_id": 0},
+                ).to_list(100)
+                errors, warnings, travel = validate_new_block(new_block, existing)
+                if errors:
+                    skipped.append({"block": {**new_block, "week": week_idx}, "errors": errors})
+                    continue
+                rest, lunch = compute_session_flags(new_block)
+                block = SessionBlock(
+                    **new_block,
+                    rest_break_required=rest,
+                    lunch_break_required=lunch,
+                    travel_minutes_before=travel,
+                    series_id=series_id,
+                    recurring_weekly=True,
+                    discipline=discipline,
+                )
+                await db.sessions.insert_one(block.model_dump())
+                therapist_ids.add(therapist_id)
+                created.append(block.model_dump())
+            except Exception as e:
+                skipped.append({"block": blk, "errors": [str(e)]})
+
+    # Update relationships + assigned_team[discipline]
+    discipline_per_therapist = {}
     for tid in therapist_ids:
         await db.therapists.update_one(
             {"id": tid},
             {"$addToSet": {"active_client_ids": client_id}},
         )
+        t = await db.therapists.find_one({"id": tid}, {"_id": 0, "therapist_role": 1})
+        discipline_per_therapist[tid] = (t or {}).get("therapist_role") or "bt"
     if therapist_ids:
+        team_update = {f"assigned_team.{discipline_per_therapist[tid]}": tid for tid in therapist_ids}
         await db.clients.update_one(
             {"id": client_id},
-            {"$addToSet": {"assigned_therapist_ids": {"$each": list(therapist_ids)}}},
+            {
+                "$addToSet": {"assigned_therapist_ids": {"$each": list(therapist_ids)}},
+                "$set": team_update,
+            },
         )
     # recompute caseload hours
     for tid in therapist_ids:
-        all_t = await db.sessions.find({"therapist_id": tid, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(500)
-        weekly = hours_scheduled(all_t) / 4.0 if all_t else 0
+        all_t = await db.sessions.find({"therapist_id": tid, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(2000)
+        weekly = hours_scheduled(all_t) / max(1, recurring_weeks) if all_t else 0
         await db.therapists.update_one({"id": tid}, {"$set": {"current_caseload_hours": round(weekly, 2)}})
-    all_c = await db.sessions.find({"client_id": client_id, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(500)
-    cw = hours_scheduled(all_c) / 4.0 if all_c else 0
+    all_c = await db.sessions.find({"client_id": client_id, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(2000)
+    cw = hours_scheduled(all_c) / max(1, recurring_weeks) if all_c else 0
     await db.clients.update_one({"id": client_id}, {"$set": {"scheduled_hours_per_week": round(cw, 2)}})
 
-    return {"created": len(created), "skipped": skipped, "sessions": created}
+    return {
+        "created": len(created),
+        "skipped": skipped,
+        "series_ids": list(set(series_by_block.values())),
+        "weeks_scheduled": recurring_weeks,
+    }
+
+
+@api.post("/sessions/series/{series_id}/cancel")
+async def cancel_series(series_id: str, body: Optional[dict] = None, user: dict = Depends(require_role("admin"))):
+    """Cancel all FUTURE sessions belonging to a series. Body: {effective_date?: 'YYYY-MM-DD'} (default today)."""
+    eff = (body or {}).get("effective_date") or datetime.now(timezone.utc).date().isoformat()
+    res = await db.sessions.update_many(
+        {"series_id": series_id, "status": "scheduled", "date": {"$gte": eff}},
+        {"$set": {"status": "cancelled"}},
+    )
+    return {"cancelled": res.modified_count, "series_id": series_id, "effective_date": eff}
 
 
 # ================= Sessions / Schedule =================

@@ -308,9 +308,15 @@ def _compose_score(coverage_pct: float, drive_min: Optional[float], is_existing:
     return round((cov * 0.55 + prox * 0.20 + rel * 0.15 + gen * 0.10) * 100, 1)
 
 
-def _free_blocks_for_therapist(therapist, client, existing_sessions):
+def _free_blocks_for_therapist(therapist, client, existing_sessions, anchor_blocks_by_day=None):
     """Return dict {day: {"blocks": [(start_min, end_min)], "target_hours": float|None}}.
-    target_hours is the client's per-day target (may be None if not specified -> falls back to total)."""
+    target_hours is the client's per-day target (may be None if not specified -> falls back to total).
+
+    `anchor_blocks_by_day`: optional dict {day: [(start_min, end_min)]} — when given (e.g. BT's
+    proposed schedule for a PM/BCBA match), the therapist's free intervals are FURTHER intersected
+    with these anchor blocks, so PM/BCBA can only be slotted DURING a BT session (the clinical
+    requirement: PM/BCBA visit *while the BT is there*).
+    """
     client_av = _availability_by_day(client.get("availability"))
     therapist_av = _windows_only(therapist.get("availability"))
     booked = _existing_blocks_by_day(
@@ -328,6 +334,11 @@ def _free_blocks_for_therapist(therapist, client, existing_sessions):
         if not c_av or not t_av:
             continue
         overlap = _intersect_intervals(c_av, t_av)
+        if anchor_blocks_by_day is not None:
+            anchor = anchor_blocks_by_day.get(day) or []
+            if not anchor:
+                continue  # no BT presence that day → PM/BCBA can't slot in
+            overlap = _intersect_intervals(overlap, anchor)
         free_day = _subtract_intervals(overlap, booked.get(day, []))
         if free_day:
             free[day] = {
@@ -337,31 +348,39 @@ def _free_blocks_for_therapist(therapist, client, existing_sessions):
     return free
 
 
-async def smart_match(db, client: dict):
+async def smart_match(db, client: dict, discipline: str = "bt", anchor_blocks_by_day=None, target_hours_override: Optional[float] = None):
     """Return single-therapist options + multi-therapist options.
 
-    Per-day targets: if client availability rows specify `hours`, the matcher
-    tries to satisfy that exact daily target. Otherwise it greedily fills
-    `needed_hours_per_week` across all available days.
+    `discipline`: filter therapists to one role ('bt' | 'program_manager' | 'bcba'). BT is the default.
+    `anchor_blocks_by_day`: when matching PM/BCBA, pass BT's proposed blocks per day so PM/BCBA blocks
+                            are constrained to fall WITHIN BT presence.
+    `target_hours_override`: explicit weekly target (e.g. PM=2, BCBA=0.75). Overrides client's needed_hours.
     """
-    needed_hours = float(client.get("needed_hours_per_week") or 0)
-    # compute per-day targets from client availability
-    client_av = _availability_by_day(client.get("availability"))
-    daily_targets = {d: client_av[d]["target_hours"] for d in range(7) if client_av[d]["target_hours"] is not None}
-    # If user provided per-day hours, prefer their sum as the source of truth
-    if daily_targets:
-        explicit_total = sum(daily_targets.values())
-        if explicit_total > 0:
-            needed_hours = explicit_total
+    needed_hours = float(target_hours_override if target_hours_override is not None
+                         else (client.get("needed_hours_per_week") or 0))
+    # compute per-day targets from client availability — only meaningful for the BT primary match
+    if discipline == "bt" and target_hours_override is None:
+        client_av = _availability_by_day(client.get("availability"))
+        daily_targets = {d: client_av[d]["target_hours"] for d in range(7) if client_av[d]["target_hours"] is not None}
+        if daily_targets:
+            explicit_total = sum(daily_targets.values())
+            if explicit_total > 0:
+                needed_hours = explicit_total
+    else:
+        daily_targets = {}
 
-    therapists = await db.therapists.find({}, {"_id": 0}).to_list(500)
+    therapists = await db.therapists.find({"therapist_role": discipline}, {"_id": 0}).to_list(500)
+    # Backward-compat: if no therapists explicitly tagged with this role and we're matching BT,
+    # fall back to all therapists (treat them as BTs by default).
+    if not therapists and discipline == "bt":
+        therapists = await db.therapists.find({}, {"_id": 0}).to_list(500)
 
     candidates = []
     for t in therapists:
         if not _therapist_meets_filters(t, client):
             continue
         sessions = await db.sessions.find({"therapist_id": t["id"], "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(500)
-        free = _free_blocks_for_therapist(t, client, sessions)
+        free = _free_blocks_for_therapist(t, client, sessions, anchor_blocks_by_day=anchor_blocks_by_day)
         free_hours = sum((e - s) for d in free.values() for s, e in d["blocks"]) / 60.0
         if free_hours <= 0:
             continue
