@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../lib/api";
-import { getToken } from "../lib/api";
+import { api, getToken, backendOrigin } from "../lib/api";
 import PageHeader from "../components/PageHeader";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
@@ -24,7 +23,7 @@ export default function TherapistPortal() {
 
   const exportIcs = () => {
     const token = getToken();
-    const url = `${process.env.REACT_APP_BACKEND_URL}/api/sessions/export.ics?token=${encodeURIComponent(token || "")}`;
+    const url = `${backendOrigin()}/api/sessions/export.ics?token=${encodeURIComponent(token || "")}`;
     window.open(url, "_blank");
   };
 

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { api, formatApiError } from "../lib/api";
-import { getToken } from "../lib/api";
+import { api, formatApiError, getToken, backendOrigin } from "../lib/api";
 import PageHeader from "../components/PageHeader";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -8,6 +7,7 @@ import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, ChevronLeft, ChevronRight, AlertTriangle, Coffee, Car, Download } from "lucide-react";
+import { formatLocalISODate } from "../lib/dates";
 
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const HOURS = Array.from({length: 14}, (_, i) => 8 + i); // 8am..9pm
@@ -23,7 +23,7 @@ function startOfWeek(d) {
 }
 
 function addDays(d, n) { const c = new Date(d); c.setDate(c.getDate()+n); return c; }
-function iso(d) { return d.toISOString().slice(0,10); }
+function iso(d) { return formatLocalISODate(d); }
 
 export default function SchedulePage() {
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date()));
@@ -111,7 +111,7 @@ export default function SchedulePage() {
               size="sm"
               onClick={() => {
                 const token = getToken();
-                const url = `${process.env.REACT_APP_BACKEND_URL}/api/sessions/export.ics?therapist_id=${therapistId}&token=${encodeURIComponent(token || "")}`;
+                const url = `${backendOrigin()}/api/sessions/export.ics?therapist_id=${therapistId}&token=${encodeURIComponent(token || "")}`;
                 window.open(url, "_blank");
               }}
               disabled={!therapistId}

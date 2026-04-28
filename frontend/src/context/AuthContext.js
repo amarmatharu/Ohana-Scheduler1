@@ -34,7 +34,17 @@ export function AuthProvider({ children }) {
       setUser(data);
       return { ok: true, user: data };
     } catch (e) {
-      return { ok: false, error: formatApiError(e.response?.data?.detail) || e.message };
+      const noResponse = !e.response;
+      const networkish =
+        noResponse &&
+        (e.message === "Network Error" || e.code === "ERR_NETWORK" || e.code === "ECONNABORTED");
+      const fallback =
+        networkish &&
+        "Cannot reach the API. Start the backend on port 8001 and run the app from frontend/ (dev proxy).";
+      return {
+        ok: false,
+        error: formatApiError(e.response?.data?.detail) || fallback || e.message,
+      };
     }
   };
 
@@ -44,7 +54,17 @@ export function AuthProvider({ children }) {
       setUser(data);
       return { ok: true, user: data };
     } catch (e) {
-      return { ok: false, error: formatApiError(e.response?.data?.detail) || e.message };
+      const noResponse = !e.response;
+      const networkish =
+        noResponse &&
+        (e.message === "Network Error" || e.code === "ERR_NETWORK" || e.code === "ECONNABORTED");
+      const fallback =
+        networkish &&
+        "Cannot reach the API. Start the backend on port 8001 and run the app from frontend/ (dev proxy).";
+      return {
+        ok: false,
+        error: formatApiError(e.response?.data?.detail) || fallback || e.message,
+      };
     }
   };
 

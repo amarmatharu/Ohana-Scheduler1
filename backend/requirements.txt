@@ -1,27 +1,45 @@
+# ---- Web framework ----
 fastapi==0.110.1
-uvicorn==0.25.0
-boto3>=1.34.129
-requests-oauthlib>=2.0.0
-cryptography>=42.0.8
-python-dotenv>=1.0.1
-pymongo==4.5.0
+uvicorn[standard]==0.25.0
+gunicorn>=22.0.0
+python-multipart>=0.0.9
+
+# ---- HTTP client (used by maps_service) ----
+httpx>=0.27.0
+
+# ---- Database ----
+# pymongo 4.5 + Python 3.12 + Atlas hits a TLS handshake bug
+# (TLSV1_ALERT_INTERNAL_ERROR). 4.10+ resolves it, and motor 3.6+ is the matching
+# async driver. See backend/server.py for the certifi-CA-bundle workaround.
+pymongo>=4.10.0,<5
+motor>=3.6.0,<4
+certifi>=2024.7.4
+
+# ---- Validation / models ----
 pydantic>=2.6.4
 email-validator>=2.2.0
+
+# ---- Auth / crypto ----
 pyjwt>=2.10.1
 bcrypt==4.1.3
-passlib>=1.7.4
+cryptography>=42.0.8
+
+# ---- AWS SDK (used by deploy + future Location Service swap) ----
+boto3>=1.34.129
+
+# ---- Config / env ----
+python-dotenv>=1.0.1
 tzdata>=2024.2
-motor==3.3.1
+
+# ---- Logging ----
+python-json-logger>=2.0.7
+
+# ---- HTTP client used by integration tests ----
+requests>=2.31.0
+
+# ---- Dev / quality (kept here for simplicity; safe to split into requirements-dev.txt later) ----
 pytest>=8.0.0
 black>=24.1.1
 isort>=5.13.2
 flake8>=7.0.0
 mypy>=1.8.0
-python-jose>=3.3.0
-requests>=2.31.0
-pandas>=2.2.0
-numpy>=1.26.0
-python-multipart>=0.0.9
-jq>=1.6.0
-typer>=0.9.0
-emergentintegrations==0.1.0

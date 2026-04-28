@@ -18,7 +18,12 @@ function durationHours(start, end) {
   return Math.max(0, mins / 60);
 }
 
-export default function AvailabilityEditor({ value = [], onChange, showHours = false }) {
+// Weekday quick-fill default. Most pilot clients are after-school ABA, so
+// Mon–Fri 15:00–19:30 covers the common case in one click.
+const WEEKDAY_DEFAULT_START = "15:00";
+const WEEKDAY_DEFAULT_END = "19:30";
+
+export default function AvailabilityEditor({ value = [], onChange, showHours = false, targetTotalHours = 0 }) {
   const addBlock = () => {
     const day = 0;
     const start = "15:00";
@@ -27,6 +32,33 @@ export default function AvailabilityEditor({ value = [], onChange, showHours = f
     const next = { day, start, end };
     if (showHours) next.hours = hours;
     onChange([...value, next]);
+  };
+  // Adds Mon-Fri at the default window. When `showHours` is on (client form),
+  // distribute the remaining `targetTotalHours` (i.e. needed_hours_per_week
+  // minus already-allocated hours) evenly across the new days, capped at the
+  // window length. Existing day blocks are preserved as-is so manual edits
+  // aren't clobbered.
+  const addWeekdayDefaults = () => {
+    const existingDays = new Set(value.map((b) => b.day));
+    const newDays = [];
+    for (let day = 0; day < 5; day++) {
+      if (!existingDays.has(day)) newDays.push(day);
+    }
+    if (newDays.length === 0) return;
+    const winDur = durationHours(WEEKDAY_DEFAULT_START, WEEKDAY_DEFAULT_END);
+    let perDayHours = winDur;
+    if (showHours) {
+      const allocated = value.reduce((sum, b) => sum + (parseFloat(b.hours) || 0), 0);
+      const remaining = Math.max(0, (targetTotalHours || 0) - allocated);
+      const desired = remaining > 0 ? remaining / newDays.length : winDur;
+      perDayHours = Math.min(winDur, Math.round(desired * 2) / 2); // round to nearest 0.5
+    }
+    const additions = newDays.map((day) => {
+      const block = { day, start: WEEKDAY_DEFAULT_START, end: WEEKDAY_DEFAULT_END };
+      if (showHours) block.hours = perDayHours;
+      return block;
+    });
+    onChange([...value, ...additions].sort((a, b) => a.day - b.day));
   };
   const updateBlock = (i, patch) => {
     const next = value.slice();
@@ -49,6 +81,9 @@ export default function AvailabilityEditor({ value = [], onChange, showHours = f
   const totalHours = showHours
     ? value.reduce((sum, b) => sum + (parseFloat(b.hours) || 0), 0)
     : 0;
+  const target = parseFloat(targetTotalHours) || 0;
+  const hasTarget = showHours && target > 0;
+  const totalMatchesTarget = hasTarget && Math.abs(totalHours - target) < 0.05;
 
   return (
     <div className="space-y-2" data-testid="availability-editor">
@@ -115,26 +150,55 @@ export default function AvailabilityEditor({ value = [], onChange, showHours = f
           </div>
         );
       })}
-      <div className="flex items-center justify-between gap-3">
-        <button
-          type="button"
-          onClick={addBlock}
-          data-testid="avail-add"
-          className="h-10 px-4 rounded-md border border-dashed border-soft text-sm text-[#274f38] hover:border-[#274f38]"
-        >
-          + Add availability window
-        </button>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={addWeekdayDefaults}
+            data-testid="avail-add-weekdays"
+            className="h-10 px-4 rounded-md border border-dashed border-[#274f38] text-sm text-[#274f38] hover:bg-[#E5EBE8]"
+            title="Adds Mon–Fri 3:00 PM – 7:30 PM (skips days you've already added)"
+          >
+            + Weekdays 3:00 – 7:30 PM
+          </button>
+          <button
+            type="button"
+            onClick={addBlock}
+            data-testid="avail-add"
+            className="h-10 px-4 rounded-md border border-dashed border-soft text-sm text-[#274f38] hover:border-[#274f38]"
+          >
+            + Add custom window
+          </button>
+        </div>
         {showHours && value.length > 0 && (
-          <div data-testid="avail-total" className="inline-flex items-center gap-2 text-sm bg-[#E5EBE8] text-[#274f38] px-3 py-1.5 rounded-md">
+          <div
+            data-testid="avail-total"
+            className={`inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-md ${
+              !hasTarget
+                ? "bg-[#E5EBE8] text-[#274f38]"
+                : totalMatchesTarget
+                ? "bg-[#E5EBE8] text-[#274f38]"
+                : "bg-[#FBE8E8] text-[#B85C5C]"
+            }`}
+          >
             <Clock size={14} />
-            <span className="font-mono">{totalHours.toFixed(1)} hr / week</span>
+            <span className="font-mono">
+              {totalHours.toFixed(1)} hr / week
+              {hasTarget && (
+                <span className="ml-1 opacity-80">
+                  {" "}/ {target.toFixed(1)} needed
+                </span>
+              )}
+            </span>
           </div>
         )}
       </div>
       {showHours && (
         <p className="text-xs text-muted-ohana mt-1">
           Set how many therapy hours are wanted on each day (may be less than the window itself).
-          Total hours below should match the client's needed weekly hours.
+          {hasTarget
+            ? ` Hours/day should total ${target.toFixed(1)} hr/week (the client's needed weekly hours).`
+            : " Total hours should match the client's needed weekly hours."}
         </p>
       )}
     </div>

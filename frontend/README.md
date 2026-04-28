@@ -2,6 +2,17 @@
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+## Install and run (use npm here)
+
+From the **`frontend`** directory:
+
+```bash
+npm install
+npm start
+```
+
+**Do not use `yarn start` on machines where Yarn reads a corporate `~/.npmrc` with placeholders like `${NEXUS_NPM_USER}`** — Yarn v1 fails before any script runs. This repo includes a committed **`frontend/.npmrc`** (public registry + `legacy-peer-deps`) and **`package-lock.json`** so **`npm install` / `npm start`** work reliably.
+
 ## Available Scripts
 
 In the project directory, you can run:
@@ -9,7 +20,11 @@ In the project directory, you can run:
 ### `npm start`
 
 Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Open [http://localhost:3002](http://localhost:3002) to view it in your browser (see `.env.development`).
+
+From `frontend/`, API calls go to `/api` and `package.json` **proxy** forwards them to FastAPI on `127.0.0.1:8001`, so start the backend there before signing in.
+
+If the browser calls `http://localhost:8001/...` directly, you will see **CORS** errors: remove `REACT_APP_BACKEND_URL` from **`frontend/.env.local`**, or set `REACT_APP_BACKEND_DIRECT=true` with that URL and fix **`CORS_ALLOWED_ORIGINS`** on the backend (include `http://localhost:3002`).
 
 The page will reload when you make changes.\
 You may also see any lint errors in the console.

@@ -1,5 +1,7 @@
 """Smart matching: availability-based, tries single therapist first then multi-therapist combos."""
-from typing import List, Optional
+import asyncio
+from collections import Counter
+from typing import List, Optional, Tuple
 from datetime import datetime, timedelta, date, timezone
 from maps_service import distance_matrix, haversine_km
 
@@ -106,11 +108,23 @@ def _windows_only(av_list):
     return by_day
 
 
-def _existing_blocks_by_day(sessions, week_start_date: Optional[date] = None):
-    """Group existing therapist sessions by day-of-week (0..6)."""
+def _existing_blocks_by_day(
+    sessions,
+    week_start_date: Optional[date] = None,
+    exclude_client_id: Optional[str] = None,
+):
+    """Group existing therapist sessions by day-of-week (0..6).
+
+    When ``exclude_client_id`` is set, sessions for that client are skipped so
+    smart matching can propose a replacement week without treating their current
+    sessions with this therapist as hard blocks (same idea as preview
+    ``exclude_client_id``).
+    """
     by_day = {i: [] for i in range(7)}
     for s in sessions:
         if s.get("status") == "cancelled":
+            continue
+        if exclude_client_id and s.get("client_id") == exclude_client_id:
             continue
         try:
             sd = datetime.strptime(s["date"], "%Y-%m-%d").date()
@@ -184,19 +198,105 @@ def _therapist_meets_filters(therapist, client) -> bool:
     return True
 
 
+async def _peer_client_ids_for_travel(db, therapist_id: str, exclude_client_id: str) -> List[str]:
+    """Other clients this therapist serves (active list + anyone on their calendar)."""
+    t = await db.therapists.find_one({"id": therapist_id}, {"_id": 0, "active_client_ids": 1})
+    ids = set()
+    if t:
+        for cid in t.get("active_client_ids") or []:
+            if cid and cid != exclude_client_id:
+                ids.add(cid)
+    sessions = await db.sessions.find(
+        {"therapist_id": therapist_id, "status": {"$ne": "cancelled"}},
+        {"_id": 0, "client_id": 1},
+    ).to_list(2000)
+    for s in sessions:
+        cid = s.get("client_id")
+        if cid and cid != exclude_client_id:
+            ids.add(cid)
+    return list(ids)
+
+
+async def _peer_client_home_coords(db, therapist_id: str, exclude_client_id: str) -> List[Tuple[float, float]]:
+    """(lat, lng) for each other client's home, when geocoded."""
+    peer_ids = await _peer_client_ids_for_travel(db, therapist_id, exclude_client_id)
+    if not peer_ids:
+        return []
+    docs = await db.clients.find({"id": {"$in": peer_ids}}, {"_id": 0, "lat": 1, "lng": 1}).to_list(500)
+    out = []
+    for d in docs:
+        la, ln = d.get("lat"), d.get("lng")
+        if la is not None and ln is not None:
+            out.append((float(la), float(ln)))
+    return out
+
+
+async def _inter_client_drive_stats(db, candidate_client: dict, peer_coords: List[Tuple[float, float]]) -> dict:
+    """Driving time from each other client's home to the candidate client's home."""
+    if not peer_coords or not candidate_client.get("lat") or not candidate_client.get("lng"):
+        return {"min_minutes": None, "max_minutes": None, "min_km": None, "max_km": None}
+    dest = (float(candidate_client["lat"]), float(candidate_client["lng"]))
+
+    async def one_leg(origin: Tuple[float, float]):
+        dm = await distance_matrix(db, origin, dest)
+        if dm:
+            return dm["duration_minutes"], dm["distance_km"]
+        km = haversine_km(origin, dest)
+        return km * 1.8, km
+
+    legs = await asyncio.gather(*[one_leg(o) for o in peer_coords])
+    minutes = [a[0] for a in legs]
+    kms = [a[1] for a in legs]
+    return {
+        "min_minutes": min(minutes),
+        "max_minutes": max(minutes),
+        "min_km": min(kms),
+        "max_km": max(kms),
+    }
+
+
+def _blend_drive_for_score(home_minutes: Optional[float], inter_minutes: Optional[float]) -> Optional[float]:
+    """Combine therapist→client and best peer→client leg (50/50 when both exist)."""
+    if home_minutes is None and inter_minutes is None:
+        return None
+    if home_minutes is None:
+        return inter_minutes
+    if inter_minutes is None:
+        return home_minutes
+    return 0.5 * home_minutes + 0.5 * inter_minutes
+
+
 async def _therapist_score_meta(db, therapist, client):
-    """Compute drive_minutes, distance_km, relationship boost, etc."""
-    drive_min, distance_km = None, None
+    """Compute drive times (home→client, peer clients→client), distance_km (home leg), relationship."""
+    drive_home_min, distance_km = None, None
     if client.get("lat") and client.get("lng") and therapist.get("lat") and therapist.get("lng"):
         dm = await distance_matrix(db, (therapist["lat"], therapist["lng"]), (client["lat"], client["lng"]))
         if dm:
-            drive_min = dm["duration_minutes"]
+            drive_home_min = dm["duration_minutes"]
             distance_km = dm["distance_km"]
         else:
             distance_km = haversine_km((therapist["lat"], therapist["lng"]), (client["lat"], client["lng"]))
-            drive_min = distance_km * 1.8
+            drive_home_min = distance_km * 1.8
+
+    peer_coords = await _peer_client_home_coords(db, therapist["id"], client["id"])
+    inter = await _inter_client_drive_stats(db, client, peer_coords)
+    inter_min = inter["min_minutes"]
+    inter_max = inter["max_minutes"]
+
+    drive_for_score = _blend_drive_for_score(drive_home_min, inter_min)
+
     is_existing = client["id"] in (therapist.get("active_client_ids") or [])
-    return {"drive_minutes": drive_min, "distance_km": distance_km, "is_existing_relationship": is_existing}
+    return {
+        "drive_minutes": drive_for_score,
+        "drive_minutes_home": drive_home_min,
+        "distance_km": distance_km,
+        "inter_client_min_minutes": inter_min,
+        "inter_client_max_minutes": inter_max,
+        "inter_client_min_km": inter["min_km"],
+        "inter_client_max_km": inter["max_km"],
+        "peer_caseload_count": len(peer_coords),
+        "is_existing_relationship": is_existing,
+    }
 
 
 def _compose_score(coverage_pct: float, drive_min: Optional[float], is_existing: bool, gender_match: bool) -> float:
@@ -213,7 +313,10 @@ def _free_blocks_for_therapist(therapist, client, existing_sessions):
     target_hours is the client's per-day target (may be None if not specified -> falls back to total)."""
     client_av = _availability_by_day(client.get("availability"))
     therapist_av = _windows_only(therapist.get("availability"))
-    booked = _existing_blocks_by_day(existing_sessions)
+    booked = _existing_blocks_by_day(
+        existing_sessions,
+        exclude_client_id=client.get("id"),
+    )
     free = {}
     for day in range(7):
         if not therapist.get("weekend_available", False) and day >= 5:
@@ -291,9 +394,14 @@ async def smart_match(db, client: dict):
             "therapists": [{
                 "therapist_id": c["therapist"]["id"],
                 "therapist_name": c["therapist"]["name"],
+                "therapist_role": c["therapist"].get("therapist_role") or "bt",
                 "skill_level": c["therapist"].get("skill_level"),
                 "gender": c["therapist"].get("gender"),
                 "drive_minutes": c["meta"]["drive_minutes"],
+                "drive_minutes_home": c["meta"].get("drive_minutes_home"),
+                "inter_client_min_minutes": c["meta"].get("inter_client_min_minutes"),
+                "inter_client_max_minutes": c["meta"].get("inter_client_max_minutes"),
+                "peer_caseload_count": c["meta"].get("peer_caseload_count") or 0,
                 "distance_km": c["meta"]["distance_km"],
                 "is_existing_relationship": c["meta"]["is_existing_relationship"],
                 "available_hours": round(c["free_hours"], 1),
@@ -340,6 +448,58 @@ async def smart_match(db, client: dict):
     }
 
 
+def _fits_in_day_blocks(blocks, s0: int, e0: int) -> bool:
+    """True if [s0, e0] lies entirely inside some free block (same therapist+day)."""
+    for s, e in blocks:
+        if s <= s0 and e >= e0:
+            return True
+    return False
+
+
+def _align_weekday_anchor(free_by_day, chosen, daily_targets) -> list:
+    """Snap Mon–Fri proposals to one clock time when every day can host that window.
+
+    Greedy per-day placement can pick a later 2h segment when an earlier one would
+    also work (e.g. same-length segments ordered arbitrarily). After allocation,
+    use Monday's slot (or the first weekday with a single block) as the anchor and
+    move each other weekday to the same start/end when it still fits that day's
+    free blocks.
+    """
+    if not daily_targets or not chosen:
+        return chosen
+    from collections import defaultdict
+
+    by_day = defaultdict(list)
+    for day, s, e in chosen:
+        by_day[day].append((s, e))
+
+    anchor_s, anchor_e = None, None
+    if len(by_day.get(0, [])) == 1:
+        anchor_s, anchor_e = by_day[0][0]
+    else:
+        for d in range(1, 5):
+            if len(by_day.get(d, [])) == 1:
+                anchor_s, anchor_e = by_day[d][0]
+                break
+    if anchor_s is None:
+        return chosen
+
+    new_chosen = []
+    for day, s, e in chosen:
+        if day not in range(5) or day not in daily_targets:
+            new_chosen.append((day, s, e))
+            continue
+        if len(by_day[day]) != 1:
+            new_chosen.append((day, s, e))
+            continue
+        blocks = (free_by_day.get(day) or {}).get("blocks", [])
+        if _fits_in_day_blocks(blocks, anchor_s, anchor_e):
+            new_chosen.append((day, anchor_s, anchor_e))
+        else:
+            new_chosen.append((day, s, e))
+    return new_chosen
+
+
 def _allocate_single_therapist(free_by_day, total_needed, daily_targets):
     """If daily_targets is non-empty, allocate per day target. Otherwise greedy across days."""
     chosen = []  # (day, start, end)
@@ -350,6 +510,7 @@ def _allocate_single_therapist(free_by_day, total_needed, daily_targets):
                 continue
             day_chosen = _allocate_within_day(blocks, target)
             chosen.extend([(day, s, e) for s, e in day_chosen])
+        chosen = _align_weekday_anchor(free_by_day, chosen, daily_targets)
     else:
         # greedy across all days
         all_blocks = []
@@ -362,9 +523,18 @@ def _allocate_single_therapist(free_by_day, total_needed, daily_targets):
 
 
 def _allocate_within_day(blocks, target_hours):
-    """Allocate ~target_hours within a single day's free blocks (longest first, may split into 2)."""
+    """Allocate ~target_hours within a single day's free blocks.
+
+    Prefer the earliest contiguous window that fully fits the target; if none,
+    fall back to greedy fill (longest segment first, then tie-break earliest).
+    """
     target_min = int(target_hours * 60)
-    sorted_blocks = sorted(blocks, key=lambda b: -(b[1] - b[0]))
+    if target_min <= 0:
+        return []
+    for s, e in sorted(blocks, key=lambda b: (b[0], -(b[1] - b[0]))):
+        if e - s >= target_min:
+            return [(s, s + target_min)]
+    sorted_blocks = sorted(blocks, key=lambda b: (-(b[1] - b[0]), b[0]))
     chosen = []
     total = 0
     for s, e in sorted_blocks:
@@ -380,7 +550,7 @@ def _allocate_within_day(blocks, target_hours):
 def _allocate_with_days(blocks_with_day, hours_needed):
     """Allocate (day, start, end) blocks until hours_needed satisfied, longest first."""
     target_min = int(hours_needed * 60)
-    sorted_blocks = sorted(blocks_with_day, key=lambda b: -(b[2] - b[1]))
+    sorted_blocks = sorted(blocks_with_day, key=lambda b: (-(b[2] - b[1]), b[0], b[1]))
     chosen = []
     total = 0
     for d, s, e in sorted_blocks:
@@ -404,8 +574,14 @@ def _tags(c, fully_covered):
         tags.append("Existing relationship")
     if c["gender_match"]:
         tags.append("Gender preference match")
-    if c["meta"]["drive_minutes"] is not None and c["meta"]["drive_minutes"] <= 15:
+    meta = c["meta"]
+    if meta.get("drive_minutes") is not None and meta["drive_minutes"] <= 15:
         tags.append("Nearby")
+    ic = meta.get("inter_client_min_minutes")
+    if ic is not None and ic <= 20:
+        tags.append("Near existing caseload")
+    if meta.get("inter_client_max_minutes") is not None and meta["inter_client_max_minutes"] >= 55:
+        tags.append("Wide spread vs other clients")
     return tags
 
 
@@ -445,6 +621,21 @@ async def _build_multi_options(db, client, candidates, needed_hours, daily_targe
                     therapist_blocks[i].extend([(day, s, e) for s, e in chunks])
                     used_days.setdefault(day, []).extend(chunks)
                     day_remaining[day] = max(0.0, target - covered)
+            # Snap Mon–Fri clocks per therapist when each weekday has at most one
+            # team block (avoids shifting into another therapist's same-day slot).
+            day_block_counts = Counter()
+            for i in order:
+                for d, s, e in therapist_blocks.get(i, []):
+                    if d < 5:
+                        day_block_counts[d] += 1
+            if all(day_block_counts.get(d, 0) <= 1 for d in range(5)):
+                for i in order:
+                    if not therapist_blocks.get(i, []):
+                        continue
+                    cand = ranked[i]
+                    therapist_blocks[i] = _align_weekday_anchor(
+                        cand["free"], therapist_blocks[i], daily_targets
+                    )
             # build team objects
             for i in order:
                 if not therapist_blocks[i]:
@@ -467,9 +658,14 @@ async def _build_multi_options(db, client, candidates, needed_hours, daily_targe
                 team.append({
                     "therapist_id": cand["therapist"]["id"],
                     "therapist_name": cand["therapist"]["name"],
+                    "therapist_role": cand["therapist"].get("therapist_role") or "bt",
                     "skill_level": cand["therapist"].get("skill_level"),
                     "gender": cand["therapist"].get("gender"),
                     "drive_minutes": cand["meta"]["drive_minutes"],
+                    "drive_minutes_home": cand["meta"].get("drive_minutes_home"),
+                    "inter_client_min_minutes": cand["meta"].get("inter_client_min_minutes"),
+                    "inter_client_max_minutes": cand["meta"].get("inter_client_max_minutes"),
+                    "peer_caseload_count": cand["meta"].get("peer_caseload_count") or 0,
                     "distance_km": cand["meta"]["distance_km"],
                     "is_existing_relationship": cand["meta"]["is_existing_relationship"],
                     "covered_hours": round(covered_min / 60.0, 2),
@@ -512,9 +708,14 @@ async def _build_multi_options(db, client, candidates, needed_hours, daily_targe
                 team.append({
                     "therapist_id": cand["therapist"]["id"],
                     "therapist_name": cand["therapist"]["name"],
+                    "therapist_role": cand["therapist"].get("therapist_role") or "bt",
                     "skill_level": cand["therapist"].get("skill_level"),
                     "gender": cand["therapist"].get("gender"),
                     "drive_minutes": cand["meta"]["drive_minutes"],
+                    "drive_minutes_home": cand["meta"].get("drive_minutes_home"),
+                    "inter_client_min_minutes": cand["meta"].get("inter_client_min_minutes"),
+                    "inter_client_max_minutes": cand["meta"].get("inter_client_max_minutes"),
+                    "peer_caseload_count": cand["meta"].get("peer_caseload_count") or 0,
                     "distance_km": cand["meta"]["distance_km"],
                     "is_existing_relationship": cand["meta"]["is_existing_relationship"],
                     "covered_hours": round(covered_min / 60.0, 2),

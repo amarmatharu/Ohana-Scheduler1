@@ -8,7 +8,7 @@ import { Label } from "../components/ui/label";
 import { Button } from "../components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { toast } from "sonner";
-import { Plus, MapPin, Trash2, Pencil, ShieldCheck } from "lucide-react";
+import { Plus, MapPin, Trash2, Pencil, ShieldCheck, UserX } from "lucide-react";
 
 const empty = {
   name: "", email: "", phone: "", date_of_birth: "", age_group: "child",
@@ -20,18 +20,53 @@ const empty = {
 
 export default function ClientsPage() {
   const [clients, setClients] = useState([]);
+  const [therapists, setTherapists] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
+  const [endClient, setEndClient] = useState(null);
+  const [endTherapistId, setEndTherapistId] = useState("");
+  const [ending, setEnding] = useState(false);
 
   const load = async () => {
     try {
-      const { data } = await api.get("/clients");
-      setClients(data);
+      const [cRes, tRes] = await Promise.all([api.get("/clients"), api.get("/therapists")]);
+      setClients(cRes.data);
+      setTherapists(tRes.data);
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
   useEffect(() => { load(); }, []);
+
+  const therapistName = (id) => therapists.find((t) => t.id === id)?.name || id.slice(0, 8) + "…";
+
+  const openEndAssignment = (c) => {
+    const ids = c.assigned_therapist_ids || [];
+    if (!ids.length) return;
+    setEndClient(c);
+    setEndTherapistId(ids.length === 1 ? ids[0] : "");
+    setEndOpen(true);
+  };
+
+  const submitEndAssignment = async () => {
+    if (!endClient || !endTherapistId) {
+      toast.error("Choose a therapist");
+      return;
+    }
+    setEnding(true);
+    try {
+      await api.post(`/clients/${endClient.id}/end-assignment`, { therapist_id: endTherapistId });
+      toast.success("Assignment ended; future sessions with that therapist were cancelled.");
+      setEndOpen(false);
+      setEndClient(null);
+      load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || e.message);
+    } finally {
+      setEnding(false);
+    }
+  };
 
   const openNew = () => { setEditing(null); setForm(empty); setOpen(true); };
   const openEdit = (c) => {
@@ -96,6 +131,7 @@ export default function ClientsPage() {
                 <th className="px-6 py-3 font-semibold">Client</th>
                 <th className="px-6 py-3 font-semibold">Age group</th>
                 <th className="px-6 py-3 font-semibold">Needed / Scheduled</th>
+                <th className="px-6 py-3 font-semibold">Assigned</th>
                 <th className="px-6 py-3 font-semibold">Insurance</th>
                 <th className="px-6 py-3 font-semibold">Location</th>
                 <th className="px-6 py-3 font-semibold text-right">Actions</th>
@@ -110,6 +146,25 @@ export default function ClientsPage() {
                   </td>
                   <td className="px-6 py-4 capitalize">{c.age_group}</td>
                   <td className="px-6 py-4 font-mono text-xs">{c.scheduled_hours_per_week || 0}/{c.needed_hours_per_week} hr</td>
+                  <td className="px-6 py-4 text-xs max-w-[200px]">
+                    {(c.assigned_therapist_ids || []).length ? (
+                      <div className="space-y-1">
+                        <div className="text-muted-ohana truncate" title={(c.assigned_therapist_ids || []).map(therapistName).join(", ")}>
+                          {(c.assigned_therapist_ids || []).map(therapistName).join(", ")}
+                        </div>
+                        <button
+                          type="button"
+                          data-testid={`end-assignment-${c.id}`}
+                          onClick={() => openEndAssignment(c)}
+                          className="inline-flex items-center gap-1 text-[11px] text-[#B85C5C] hover:underline"
+                        >
+                          <UserX size={12} /> End assignment…
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-muted-ohana">—</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4 text-xs">
                     {c.insurance?.plan ? (
                       <span className="inline-flex items-center gap-1"><ShieldCheck size={12}/> {c.insurance.plan} · {c.insurance.authorized_hours_per_week}hr auth</span>
@@ -125,7 +180,7 @@ export default function ClientsPage() {
                 </tr>
               ))}
               {clients.length === 0 && (
-                <tr><td colSpan={6} className="px-6 py-10 text-center text-muted-ohana text-sm">No clients yet.</td></tr>
+                <tr><td colSpan={7} className="px-6 py-10 text-center text-muted-ohana text-sm">No clients yet.</td></tr>
               )}
             </tbody>
           </table>
@@ -190,7 +245,7 @@ export default function ClientsPage() {
               </div>
             </div>
 
-            <div><Label>Weekly availability & hours per day</Label><AvailabilityEditor value={form.availability} onChange={(v)=>setForm({...form,availability:v})} showHours={true}/></div>
+            <div><Label>Weekly availability & hours per day</Label><AvailabilityEditor value={form.availability} onChange={(v)=>setForm({...form,availability:v})} showHours={true} targetTotalHours={parseFloat(form.needed_hours_per_week) || 0}/></div>
 
             <div className="border border-soft rounded-md p-4 bg-muted-soft space-y-3">
               <div className="text-sm font-medium flex items-center gap-2"><ShieldCheck size={14}/> Insurance authorization</div>
@@ -207,6 +262,56 @@ export default function ClientsPage() {
               <Button type="submit" data-testid="save-client-btn" disabled={saving} className="bg-primary-ohana hover:bg-[#1E3D2B] text-white">{saving ? "Saving…" : "Save client"}</Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={endOpen} onOpenChange={setEndOpen}>
+        <DialogContent className="max-w-md bg-white" data-testid="end-assignment-dialog">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "Outfit" }}>End therapist assignment</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2 text-sm">
+            <p className="text-muted-ohana">
+              Ends the assignment for <span className="font-medium text-[#18231E]">{endClient?.name}</span> with the therapist below.
+              Future scheduled sessions for this pair from today onward are marked cancelled. The client can appear in Smart matching again.
+            </p>
+            {(endClient?.assigned_therapist_ids || []).length > 1 ? (
+              <div>
+                <Label>Therapist</Label>
+                <select
+                  className="mt-1 w-full h-10 px-3 rounded-md border border-soft bg-white text-sm"
+                  value={endTherapistId}
+                  onChange={(e) => setEndTherapistId(e.target.value)}
+                  data-testid="end-assignment-therapist-select"
+                >
+                  <option value="">— select —</option>
+                  {(endClient?.assigned_therapist_ids || []).map((tid) => (
+                    <option key={tid} value={tid}>
+                      {therapistName(tid)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p>
+                Therapist: <span className="font-medium">{endTherapistId ? therapistName(endTherapistId) : "—"}</span>
+              </p>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setEndOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                data-testid="confirm-end-assignment"
+                disabled={ending || !endTherapistId}
+                className="bg-[#B85C5C] hover:bg-[#9a4d50] text-white"
+                onClick={submitEndAssignment}
+              >
+                {ending ? "Working…" : "End assignment"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

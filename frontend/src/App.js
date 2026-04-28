@@ -5,6 +5,7 @@ import "@/App.css";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import Layout from "@/components/Layout";
+import PilotBanner from "@/components/PilotBanner";
 import Login from "@/pages/Login";
 import AdminDashboard from "@/pages/AdminDashboard";
 import TherapistsPage from "@/pages/TherapistsPage";
@@ -32,6 +33,7 @@ function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <PilotBanner />
         <Routes>
           <Route path="/login" element={<Login />} />
 

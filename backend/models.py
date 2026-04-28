@@ -17,6 +17,8 @@ Role = Literal["admin", "therapist", "client"]
 SkillLevel = Literal["entry", "intermediate", "experienced"]
 Gender = Literal["male", "female", "nonbinary", "no_preference"]
 AgeGroup = Literal["child", "adolescent", "adult", "senior"]
+# Clinical / program role (distinct from experience skill_level)
+TherapistRole = Literal["bt", "program_manager", "bcba"]
 
 
 # ---------- Auth / User ----------
@@ -57,6 +59,7 @@ class TherapistCreate(BaseModel):
     email: EmailStr
     phone: Optional[str] = None
     gender: Gender = "no_preference"
+    therapist_role: TherapistRole = "bt"
     skill_level: SkillLevel = "intermediate"
     skills: List[str] = Field(default_factory=list)
     home_address: str
@@ -107,6 +110,12 @@ class Client(ClientCreate):
     assigned_therapist_ids: List[str] = Field(default_factory=list)
     scheduled_hours_per_week: float = 0.0
     created_at: str = Field(default_factory=_now)
+
+
+class EndAssignmentRequest(BaseModel):
+    """Remove a client–therapist assignment and cancel their future sessions together."""
+
+    therapist_id: str
 
 
 # ---------- Sessions / Blocks ----------

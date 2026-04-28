@@ -11,14 +11,13 @@ import {
   UserPlus, Clock, Award, Car, CalendarCheck, Users, X, Filter, Plus, Trash2
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { nextMonday } from "../lib/dates";
 
-function nextMonday() {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = (8 - day) % 7 || 7; // next Monday (always future)
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
+const THERAPIST_ROLE_LABELS = {
+  bt: "BT",
+  program_manager: "PM",
+  bcba: "BCBA",
+};
 
 function CoverageBar({ covered, needed }) {
   const pct = needed > 0 ? Math.min(100, Math.round((covered / needed) * 100)) : 0;
@@ -50,9 +49,29 @@ function TherapistSummary({ t }) {
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium truncate">{t.therapist_name}</div>
         <div className="text-xs text-muted-ohana flex items-center gap-3 flex-wrap">
+          <span className="font-medium text-[#274f38]" title="Therapist role">
+            {THERAPIST_ROLE_LABELS[t.therapist_role || "bt"] || t.therapist_role}
+          </span>
           <span className="capitalize">{t.skill_level}</span>
           {t.drive_minutes != null && (
-            <span className="inline-flex items-center gap-1 font-mono"><Car size={10}/> {t.drive_minutes.toFixed(0)} min</span>
+            <span
+              className="inline-flex items-center gap-1 font-mono"
+              title={
+                (t.peer_caseload_count || 0) > 0 && t.drive_minutes_home != null && t.inter_client_min_minutes != null
+                  ? `Ranking uses an average of drive from therapist home (${Number(t.drive_minutes_home).toFixed(0)} min) and best other-client home → this client (${Number(t.inter_client_min_minutes).toFixed(0)} min).`
+                  : "Drive time from therapist home to this client (or best available estimate)."
+              }
+            >
+              <Car size={10} /> {t.drive_minutes.toFixed(0)} min
+            </span>
+          )}
+          {(t.peer_caseload_count || 0) > 0 && t.inter_client_min_minutes != null && (
+            <span
+              className="text-[10px] text-muted-ohana font-mono max-w-[140px] leading-tight"
+              title="Driving between other clients homes and this client (min–max across caseload)"
+            >
+              Other clients → here: {t.inter_client_min_minutes.toFixed(0)}–{(t.inter_client_max_minutes ?? t.inter_client_min_minutes).toFixed(0)} min
+            </span>
           )}
           {t.is_existing_relationship && (
             <span className="inline-flex items-center gap-1 text-[#B07C60]"><Heart size={10}/> Existing</span>
@@ -146,6 +165,17 @@ export default function MatchingPage() {
       setClients(data);
     })();
   }, []);
+
+  const matchableClients = useMemo(
+    () => (clients || []).filter((c) => !(c.assigned_therapist_ids && c.assigned_therapist_ids.length)),
+    [clients],
+  );
+
+  useEffect(() => {
+    if (!selectedClientId) return;
+    const ok = matchableClients.some((c) => c.id === selectedClientId);
+    if (!ok) setSelectedClientId("");
+  }, [matchableClients, selectedClientId]);
 
   const run = async () => {
     if (!selectedClientId) {
@@ -348,17 +378,25 @@ export default function MatchingPage() {
                 className="mt-2 w-full h-11 px-4 rounded-md border border-soft bg-white text-sm"
               >
                 <option value="">— choose a client —</option>
-                {clients.map(c => (
+                {matchableClients.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} · needs {c.needed_hours_per_week}hr/wk · {c.age_group}
                   </option>
                 ))}
               </select>
+              <p className="text-xs text-muted-ohana mt-2">
+                Only clients without an assigned therapist appear here. End an assignment on the Clients page to match again.
+              </p>
+              {clients.length > 0 && matchableClients.length === 0 && (
+                <p className="text-xs text-[#B07C60] mt-2" data-testid="no-matchable-clients">
+                  All clients already have at least one assigned therapist. Use Clients → End assignment to return someone to matching.
+                </p>
+              )}
             </div>
             <Button
               data-testid="run-smart-match-btn"
               onClick={run}
-              disabled={loading || !selectedClientId}
+              disabled={loading || !selectedClientId || matchableClients.length === 0}
               className="bg-primary-ohana hover:bg-[#1E3D2B] text-white h-11 px-6"
             >
               <Sparkles size={16} className="mr-2" /> {loading ? "Matching…" : "Run smart match"}
@@ -376,7 +414,7 @@ export default function MatchingPage() {
 
           {result?.daily_targets && (
             <div className="mt-3 flex flex-wrap gap-2 text-xs" data-testid="daily-targets-summary">
-              <span className="text-muted-ohana">Hours per day:</span>
+              <span className="text-muted-ohana">Target hours / day (from client):</span>
               {Object.entries(result.daily_targets).map(([day, hrs]) => (
                 <span key={day} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#E5EBE8] text-[#274f38] font-mono">
                   {day} · {hrs}h
@@ -487,7 +525,11 @@ export default function MatchingPage() {
                         </span>
                       </div>
                     )}
-                    <p className="text-xs text-muted-ohana mb-2">Drag a block vertically to change time, horizontally to change day. Click to edit details.</p>
+                    <p className="text-xs text-muted-ohana mb-2">
+                      Drag a block vertically to change time, horizontally to change day. Click to edit details.
+                      {" "}
+                      We place each day in the earliest open slot for that therapist inside your window, then align Mon–Fri to the same clock when every day can still fit it. If times still differ, that therapist has other sessions or travel buffers blocking the earlier slot on those weekdays—totals still match your targets. Drag a block to adjust.
+                    </p>
 
                     {selectedOption ? (
                       <>
